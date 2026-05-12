@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Container Packing Algorithm</title>
+  <title>Loose Container Optimizer</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
   <style>
@@ -39,10 +39,10 @@
       --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
       --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
 
-      --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
-      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-      --shadow-hover: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      --shadow-sm: none;
+      --shadow-md: none;
+      --shadow-lg: none;
+      --shadow-hover: none;
     }
 
     * {
@@ -129,7 +129,6 @@
       align-items: center;
       justify-content: center;
       font-weight: 700;
-      box-shadow: 0 0 0 4px #eff6ff;
     }
 
     .card {
@@ -137,13 +136,10 @@
       border: 1px solid rgba(226, 232, 240, 0.8);
       border-radius: var(--border-radius-xl);
       padding: 2rem;
-      box-shadow: var(--shadow-md);
-      transition: box-shadow 0.3s ease, transform 0.3s ease;
+      transition: transform 0.3s ease;
     }
 
-    .card:hover {
-      box-shadow: var(--shadow-hover);
-    }
+
 
     .g3 {
       display: grid;
@@ -181,7 +177,6 @@
     select:focus {
       outline: none;
       border-color: var(--color-brand);
-      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15);
     }
 
     .row {
@@ -190,20 +185,25 @@
       gap: 12px;
     }
 
-    .btn {
+    .btn,
+    .btn-run {
       font-family: var(--font-sans);
-      font-size: 14px;
       font-weight: 500;
       cursor: pointer;
-      padding: 10px 18px;
       border-radius: var(--border-radius-md);
-      background: var(--color-background-primary);
-      border: 1.5px solid var(--color-border-primary);
-      color: var(--color-text-primary);
       transition: all 0.2s ease;
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       gap: 8px;
+    }
+
+    .btn {
+      font-size: 14px;
+      padding: 10px 18px;
+      background: var(--color-background-primary);
+      border: 1.5px solid var(--color-border-primary);
+      color: var(--color-text-primary);
     }
 
     .btn:hover {
@@ -212,28 +212,20 @@
     }
 
     .btn-run {
-      font-family: var(--font-sans);
       font-size: 18px;
       font-weight: 600;
-      cursor: pointer;
       padding: 16px 32px;
       border-radius: var(--border-radius-lg);
       background: linear-gradient(135deg, var(--color-brand) 0%, #2563eb 100%);
       color: white;
       border: none;
       width: 100%;
-      box-shadow: var(--shadow-md);
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 10px;
       margin-top: 2rem;
     }
 
     .btn-run:hover:not(:disabled) {
       transform: translateY(-2px);
-      box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.4);
     }
 
     .btn-run:active:not(:disabled) {
@@ -244,7 +236,6 @@
       background: var(--color-border-primary);
       cursor: not-allowed;
       opacity: 0.6;
-      box-shadow: none;
     }
 
     .btn-sm {
@@ -284,7 +275,6 @@
       border-radius: var(--border-radius-lg);
       padding: 20px;
       text-align: center;
-      box-shadow: var(--shadow-sm);
       transition: transform 0.2s ease;
     }
 
@@ -425,6 +415,58 @@
       color: var(--color-brand);
     }
 
+    .upload-icon {
+      font-size: 48px;
+      display: block;
+      margin-bottom: 16px;
+    }
+
+    .upload-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--color-text-primary);
+      margin-bottom: 8px;
+    }
+
+    .upload-subtitle {
+      font-size: 14px;
+      color: var(--color-text-secondary);
+      margin-bottom: 12px;
+    }
+
+    .upload-hint {
+      font-size: 13px;
+      color: var(--color-text-tertiary);
+      line-height: 1.6;
+      max-width: 500px;
+      margin: 0 auto;
+    }
+
+    .cat-status {
+      margin-bottom: 16px;
+      padding: 12px 16px;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: var(--border-radius-md);
+    }
+
+    .cat-status i {
+      color: var(--color-text-success);
+      font-size: 24px;
+    }
+
+    .cat-status span {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--color-text-success);
+      flex: 1;
+    }
+
+    .cat-status .btn {
+      background: white;
+      border-color: #bbf7d0;
+    }
+
     .sel-small {
       font-size: 14px;
       padding: 8px 12px;
@@ -439,7 +481,9 @@
       position: absolute;
       top: 100%;
       left: 0;
-      right: 0;
+      min-width: 100%;
+      width: max-content;
+      max-width: 500px;
       background: var(--color-background-primary);
       border: 1px solid var(--color-border-primary);
       border-radius: var(--border-radius-md);
@@ -448,7 +492,6 @@
       overflow-y: auto;
       display: none;
       margin-top: 8px;
-      box-shadow: var(--shadow-lg);
     }
 
     .ac-drop.open {
@@ -573,34 +616,31 @@
     enter codes and case counts to pack an order.</h2>
 
   <div class="app-header">
+    <h1 class="app-title">Loose Container Optimizer</h1>
   </div>
   <div class="s">
-    <div class="st"><span class="st-num">1</span> Product catalogue</div>
+    <div class="st"><span class="st-num">1</span>Upload Product Master</div>
     <div class="card">
       <div id="upload-ui">
-        <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-in').click()"
-          ondragover="dzEv(event,'drag',true)" ondragleave="dzEv(event,'drag',false)" ondrop="onDrop(event)">
-          <i class="ti ti-file-spreadsheet" aria-hidden="true"
-            style="font-size:48px;display:block;margin-bottom:16px;"></i>
-          <div style="font-size:18px;font-weight:600;color:var(--color-text-primary);margin-bottom:8px;">Drop an Excel
-            file here, or click to browse</div>
-          <div style="font-size:14px;color:var(--color-text-secondary);margin-bottom:12px;">.xlsx or .xls files
-            supported</div>
-          <div style="font-size:13px;color:var(--color-text-tertiary);line-height:1.6;max-width:500px;margin:0 auto;">
+        <div class="upload-zone" id="drop-zone" onclick="$('file-in').click()" ondragover="dzEv(event,'drag',true)"
+          ondragleave="dzEv(event,'drag',false)" ondrop="onDrop(event)">
+          <i class="ti ti-file-spreadsheet upload-icon" aria-hidden="true"></i>
+          <div class="upload-title">Drop an Excel file here, or click to browse</div>
+          <div class="upload-subtitle">.xlsx or .xls files supported</div>
+          <div class="upload-hint">
             Required columns: <strong>Product Code</strong>, <strong>Product Name</strong>, <strong>Length</strong>,
-            <strong>Width</strong>, <strong>Height</strong> (mm), <strong>Gross Weight</strong> (kg) — optional:
-            <strong>Max Stack</strong></div>
+            <strong>Width</strong>, <strong>Height</strong> (mm), <strong>Gross Weight</strong> (kg),
+            <strong>Max Stack</strong>
+          </div>
         </div>
         <input type="file" id="file-in" accept=".xlsx,.xls" style="display:none" onchange="loadFile(this.files[0])">
         <div id="upload-err"></div>
       </div>
       <div id="cat-loaded" style="display:none;">
-        <div class="row"
-          style="margin-bottom:16px; padding: 12px 16px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: var(--border-radius-md);">
-          <i class="ti ti-circle-check-filled" aria-hidden="true"
-            style="color:var(--color-text-success);font-size:24px;"></i>
-          <span id="cat-label" style="font-size:15px;font-weight:600;color: var(--color-text-success);flex:1;"></span>
-          <button class="btn btn-sm" onclick="resetCatalogue()" style="background: white; border-color: #bbf7d0;">
+        <div class="row cat-status">
+          <i class="ti ti-circle-check-filled" aria-hidden="true"></i>
+          <span id="cat-label"></span>
+          <button class="btn btn-sm" onclick="resetCatalogue()">
             <i class="ti ti-replace" aria-hidden="true"></i> Replace
           </button>
         </div>
@@ -612,11 +652,10 @@
   </div>
 
   <div class="s">
-    <div class="st"><span class="st-num">2</span> Container dimensions</div>
+    <div class="st"><span class="st-num">2</span>Select container</div>
     <div class="card">
       <div class="row" style="margin-bottom:20px;">
-        <label style="font-size:14px;font-weight:600;color:var(--color-text-primary);flex-shrink:0;">Preset
-          Container:</label>
+        <label style="font-size:14px;font-weight:600;color:var(--color-text-primary);flex-shrink:0;">Preset:</label>
         <select class="sel-small" id="preset" onchange="applyPreset()" style="max-width: 250px;">
           <option value="20ft" selected>20ft Standard</option>
           <option value="40ft">40ft Standard</option>
@@ -633,20 +672,20 @@
   </div>
 
   <div class="s">
-    <div class="st"><span class="st-num">3</span> Order composition</div>
+    <div class="st"><span class="st-num">3</span> Order</div>
     <div class="card">
       <div
         style="display:grid;grid-template-columns:110px 1fr 100px 40px;gap:16px;margin-bottom:12px;padding-bottom:12px;border-bottom:2px solid var(--color-border-secondary);">
-        <div class="col-h">Code</div>
+        <div class="col-h">SKU</div>
         <div class="col-h">Product Name</div>
-        <div class="col-h" style="text-align:center;">Cases</div>
+        <div class="col-h" style="text-align:center;">Quantity, CS</div>
         <div></div>
       </div>
       <div id="order-list" style="margin-bottom:16px;"></div>
 
       <div
         style="display:flex;gap:12px;align-items:center;background:#f8fafc;padding:16px;border-radius:var(--border-radius-lg);border:1px dashed #cbd5e1;">
-        <div class="ac-wrap" style="width:180px;flex-shrink:0;" id="ac-wrap">
+        <div class="ac-wrap" style="width:200px;flex-shrink:0;" id="ac-wrap">
           <input type="text" id="ac-input" placeholder="Product code…" autocomplete="off" oninput="acFilter()"
             onfocus="acFilter()" onkeydown="acKey(event)" style="font-family:var(--font-mono);">
           <div class="ac-drop" id="ac-drop"></div>
@@ -664,33 +703,26 @@
   </div>
 
   <button class="btn-run" id="run-btn" onclick="runPacking()" disabled>
-    <i class="ti ti-package-export" aria-hidden="true" style="font-size: 24px;"></i> Pack Order
+    <i class="ti ti-package-export" aria-hidden="true" style="font-size: 24px;"></i> Containerize
   </button>
 
   <div id="results" style="margin-top:3rem;"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script>
+    const $ = id => document.getElementById(id);
     const PRESETS = { '20ft': [590, 235, 239], '40ft': [1203, 235, 239], '40hc': [1203, 235, 269] };
     const COLORS = ['#185FA5', '#0F6E56', '#993C1D', '#993556', '#3B6D11', '#854F0B'];
     const COLORS_L = ['#E6F1FB', '#E1F5EE', '#FAECE7', '#FBEAF0', '#EAF3DE', '#FAEEDA'];
 
-    let catalogue = {};
-    let catCodes = [];
-    let orderLines = [];
-    let lineCount = 0;
-    let acIdx = -1;
+    let catalogue = {}, catCodes = [], orderLines = [], lineCount = 0, acIdx = -1;
 
     function applyPreset() {
-      const v = document.getElementById('preset').value;
-      if (PRESETS[v]) {
-        document.getElementById('cL').value = PRESETS[v][0];
-        document.getElementById('cW').value = PRESETS[v][1];
-        document.getElementById('cH').value = PRESETS[v][2];
-      }
+      const v = $('preset').value;
+      if (PRESETS[v]) [$('cL').value, $('cW').value, $('cH').value] = PRESETS[v];
     }
 
-    function dzEv(e, cls, add) { e.preventDefault(); document.getElementById('drop-zone').classList[add ? 'add' : 'remove'](cls); }
+    function dzEv(e, cls, add) { e.preventDefault(); $('drop-zone').classList[add ? 'add' : 'remove'](cls); }
     function onDrop(e) { e.preventDefault(); dzEv(e, 'drag', false); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); }
     function nk(s) { return String(s).trim().toLowerCase(); }
     function findCol(keys, ...terms) { return keys.find(k => terms.some(t => nk(k).includes(t))) || null; }
@@ -701,12 +733,11 @@
       reader.onload = function (e) {
         try {
           const wb = XLSX.read(e.target.result, { type: 'array' });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
           if (!rows.length) throw new Error('Sheet appears empty.');
           parseCatalogue(rows, file.name);
         } catch (err) {
-          document.getElementById('upload-err').innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> ${err.message}</div>`;
+          $('upload-err').innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> ${err.message}</div>`;
         }
       };
       reader.readAsArrayBuffer(file);
@@ -754,27 +785,27 @@
         return `<tr><td><span class="code-pill">${c}</span></td><td>${d.name}</td><td>${d.case_length_cm.toFixed(1)}</td><td>${d.case_width_cm.toFixed(1)}</td><td>${d.case_height_cm.toFixed(1)}</td><td>${d.gross_weight_kg.toFixed(2)}</td>${colStack ? `<td>${d.max_stack_height ?? '—'}</td>` : ''}</tr>`;
       }).join('');
       if (catCodes.length > 5) tbody += `<tr><td colspan="${colStack ? 7 : 6}" style="color:var(--color-text-secondary);font-size:13px;padding:12px 16px;">… and ${catCodes.length - 5} more products</td></tr>`;
-      document.getElementById('cat-preview').innerHTML = thead + tbody;
-      document.getElementById('cat-label').textContent = `${fname} — ${catCodes.length} products${skipped ? ` (${skipped} rows skipped)` : ''}`;
-      document.getElementById('upload-ui').style.display = 'none';
-      document.getElementById('cat-loaded').style.display = 'block';
-      document.getElementById('upload-err').innerHTML = '';
-      document.getElementById('run-btn').disabled = false;
+      $('cat-preview').innerHTML = thead + tbody;
+      $('cat-label').textContent = `${fname} — ${catCodes.length} products${skipped ? ` (${skipped} rows skipped)` : ''}`;
+      $('upload-ui').style.display = 'none';
+      $('cat-loaded').style.display = 'block';
+      $('upload-err').innerHTML = '';
+      $('run-btn').disabled = false;
     }
 
     function resetCatalogue() {
       catalogue = {}; catCodes = [];
-      document.getElementById('upload-ui').style.display = 'block';
-      document.getElementById('cat-loaded').style.display = 'none';
-      document.getElementById('file-in').value = '';
-      document.getElementById('run-btn').disabled = true;
+      $('upload-ui').style.display = 'block';
+      $('cat-loaded').style.display = 'none';
+      $('file-in').value = '';
+      $('run-btn').disabled = true;
       renderOrderList();
     }
 
     function acFilter() {
-      const q = nk(document.getElementById('ac-input').value);
+      const q = nk($('ac-input').value);
       const matches = q ? catCodes.filter(c => nk(c).includes(q) || nk(catalogue[c].name).includes(q)) : catCodes;
-      const drop = document.getElementById('ac-drop');
+      const drop = $('ac-drop');
       if (!matches.length || !catCodes.length) { drop.classList.remove('open'); updateResolved(); return; }
       drop.innerHTML = matches.slice(0, 10).map(c => `<div class="ac-item" data-code="${c}" onclick="selectAc('${c.replace(/'/g, "\\'")}')">` +
         `<span class="ac-code">${c}</span><span class="ac-name">${catalogue[c].name}</span></div>`).join('');
@@ -784,17 +815,16 @@
     }
 
     function updateResolved() {
-      const code = document.getElementById('ac-input').value.trim();
-      const el = document.getElementById('resolved-name');
-      el.textContent = (code && catalogue[code]) ? catalogue[code].name : '';
+      const code = $('ac-input').value.trim();
+      $('resolved-name').textContent = (code && catalogue[code]) ? catalogue[code].name : '';
     }
 
     function selectAc(code) {
-      document.getElementById('ac-input').value = code;
-      document.getElementById('ac-drop').classList.remove('open');
+      $('ac-input').value = code;
+      $('ac-drop').classList.remove('open');
       acIdx = -1;
       updateResolved();
-      document.getElementById('new-cases').focus();
+      $('new-cases').focus();
     }
 
     function acKey(e) {
@@ -802,42 +832,37 @@
       if (e.key === 'ArrowDown') { acIdx = Math.min(acIdx + 1, items.length - 1); items.forEach((el, i) => el.classList.toggle('hi', i === acIdx)); }
       else if (e.key === 'ArrowUp') { acIdx = Math.max(acIdx - 1, 0); items.forEach((el, i) => el.classList.toggle('hi', i === acIdx)); }
       else if (e.key === 'Enter') { if (acIdx >= 0 && items[acIdx]) selectAc(items[acIdx].dataset.code); else addOrderLine(); }
-      else if (e.key === 'Escape') { document.getElementById('ac-drop').classList.remove('open'); }
+      else if (e.key === 'Escape') { $('ac-drop').classList.remove('open'); }
     }
 
-    document.addEventListener('click', function (e) {
-      if (!document.getElementById('ac-wrap').contains(e.target))
-        document.getElementById('ac-drop').classList.remove('open');
-    });
+    document.addEventListener('click', e => { if (!$('ac-wrap').contains(e.target)) $('ac-drop').classList.remove('open'); });
 
     function addOrderLine() {
-      const code = document.getElementById('ac-input').value.trim();
-      const cases = parseInt(document.getElementById('new-cases').value) || 1;
-      const errEl = document.getElementById('order-err');
-      if (!code) { errEl.innerHTML = '<div class="warn"><i class="ti ti-alert-triangle"></i> Enter a product code.</div>'; return; }
-      if (!catalogue[code]) { errEl.innerHTML = `<div class="warn"><i class="ti ti-alert-triangle"></i> Code "${code}" not found in catalogue.</div>`; return; }
-      errEl.innerHTML = '';
-      lineCount++;
-      orderLines.push({ id: lineCount, code, cases });
+      const code = $('ac-input').value.trim(), cases = parseInt($('new-cases').value) || 1, err = $('order-err');
+      if (!code) return err.innerHTML = '<div class="warn"><i class="ti ti-alert-triangle"></i> Enter a product code.</div>';
+      if (!catalogue[code]) return err.innerHTML = `<div class="warn"><i class="ti ti-alert-triangle"></i> Code "${code}" not found.</div>`;
+      err.innerHTML = '';
+      orderLines.push({ id: ++lineCount, code, cases });
       renderOrderList();
-      document.getElementById('ac-input').value = '';
-      document.getElementById('new-cases').value = '10';
-      document.getElementById('resolved-name').textContent = '';
+      $('ac-input').value = $('resolved-name').textContent = '';
+      $('new-cases').value = '10';
     }
 
     function removeOrderLine(id) { orderLines = orderLines.filter(l => l.id !== id); renderOrderList(); }
 
     function renderOrderList() {
-      const list = document.getElementById('order-list');
-      if (!orderLines.length) { list.innerHTML = '<div style="font-size:14px;color:var(--color-text-tertiary);padding:16px 0;text-align:center;border:1px dashed #cbd5e1;border-radius:var(--border-radius-md);">No products added yet.</div>'; return; }
+      const list = $('order-list');
+      if (!orderLines.length) return list.innerHTML = '<div style="font-size:14px;color:var(--color-text-tertiary);padding:16px 0;text-align:center;border:1px dashed #cbd5e1;border-radius:var(--border-radius-md);">No products added yet.</div>';
       list.innerHTML = orderLines.map(l => {
         const prod = catalogue[l.code];
         return `<div class="order-row">
-      <div><span class="code-pill">${l.code}</span></div>
-      <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${prod ? `<span style="font-size:15px;font-weight:500;color:var(--color-text-primary);">${prod.name}</span>` : `<span class="badge tag-err"><i class="ti ti-x" aria-hidden="true"></i> not in catalogue</span>`}</div>
-      <input type="number" value="${l.cases}" min="1" style="text-align:center;" onchange="orderLines.find(x=>x.id===${l.id}).cases=parseInt(this.value)||1">
-      <button class="rm" onclick="removeOrderLine(${l.id})" aria-label="Remove line"><i class="ti ti-trash" aria-hidden="true"></i></button>
-    </div>`;
+          <div><span class="code-pill">${l.code}</span></div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            <span style="font-size:15px;font-weight:500;color:var(--color-text-primary);">${prod ? prod.name : '<span class="badge tag-err">not in catalogue</span>'}</span>
+          </div>
+          <input type="number" value="${l.cases}" min="1" style="text-align:center;" onchange="orderLines.find(x=>x.id===${l.id}).cases=parseInt(this.value)||1">
+          <button class="rm" onclick="removeOrderLine(${l.id})" aria-label="Remove line"><i class="ti ti-trash"></i></button>
+        </div>`;
       }).join('');
     }
 
@@ -895,13 +920,77 @@
       }
 
       const byCode = {};
-      for (const p of floorPlan) { if (!byCode[p.code]) byCode[p.code] = []; byCode[p.code].push(p); }
+      floorPlan.forEach(p => (byCode[p.code] = byCode[p.code] || []).push(p));
       const usedArea = floorPlan.reduce((s, p) => s + p.footprint_l * p.footprint_w, 0);
       const totalWeight = floorPlan.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0);
       return {
         success: true, placement_plan: byCode, floor_plan: floorPlan,
         metrics: { stacks: floorPlan.length, utilisation: Math.round(usedArea / (cL * cW) * 100), total_cases: order.reduce((s, p) => s + p.case_count, 0), total_weight: totalWeight }
       };
+    }
+
+    function renderIsoViz(floorPlan, container, colorMap) {
+      const cL = container.length, cW = container.width, cH = container.height;
+      const cos30 = Math.cos(Math.PI / 6), sin30 = Math.sin(Math.PI / 6);
+
+      function iso(x, y, z) { return { u: (x - y) * cos30, v: (x + y) * sin30 - z }; }
+
+      const corners = [
+        iso(0, 0, 0), iso(cL, 0, 0), iso(0, cW, 0), iso(cL, cW, 0),
+        iso(0, 0, cH), iso(cL, 0, cH), iso(0, cW, cH), iso(cL, cW, cH)
+      ];
+      let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+      for (const p of corners) {
+        minU = Math.min(minU, p.u); maxU = Math.max(maxU, p.u);
+        minV = Math.min(minV, p.v); maxV = Math.max(maxV, p.v);
+      }
+
+      const dW = maxU - minU, dH = maxV - minV;
+      const W = 700, H = 400, pad = 30;
+      const scale = Math.min((W - pad * 2) / dW, (H - pad * 2) / dH);
+
+      const offsetX = (W - dW * scale) / 2 - minU * scale;
+      const offsetY = (H - dH * scale) / 2 - minV * scale + 10;
+
+      function proj(x, y, z) {
+        const p = iso(x, y, z);
+        return { x: offsetX + p.u * scale, y: offsetY + p.v * scale };
+      }
+
+      function toPts(arr) { return arr.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '); }
+
+      let svgs = '';
+
+      const base1 = proj(0, 0, 0), base2 = proj(cL, 0, 0), base3 = proj(cL, cW, 0), base4 = proj(0, cW, 0);
+      svgs += `<polygon points="${toPts([base1, base2, base3, base4])}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5" stroke-linejoin="round"/>`;
+
+      const lb1 = proj(0, 0, 0), lb2 = proj(0, cW, 0), lb3 = proj(0, cW, cH), lb4 = proj(0, 0, cH);
+      svgs += `<polygon points="${toPts([lb1, lb2, lb3, lb4])}" fill="#f1f5f9" fill-opacity="0.6" stroke="#e2e8f0" stroke-width="1" stroke-linejoin="round"/>`;
+
+      const rb1 = proj(0, 0, 0), rb2 = proj(cL, 0, 0), rb3 = proj(cL, 0, cH), rb4 = proj(0, 0, cH);
+      svgs += `<polygon points="${toPts([rb1, rb2, rb3, rb4])}" fill="#f1f5f9" fill-opacity="0.4" stroke="#e2e8f0" stroke-width="1" stroke-linejoin="round"/>`;
+
+      const sortedPlan = [...floorPlan].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+
+      for (const p of sortedPlan) {
+        const col = colorMap[p.code];
+        const x = p.x, y = p.y, l = p.footprint_l, w = p.footprint_w, h = p.physical_height;
+
+        const t1 = proj(x, y, h), t2 = proj(x + l, y, h), t3 = proj(x + l, y + w, h), t4 = proj(x, y + w, h);
+        svgs += `<polygon points="${toPts([t1, t2, t3, t4])}" fill="${col.bg}" stroke="${col.fg}" stroke-width="1" stroke-linejoin="round"/>`;
+
+        const l1 = proj(x, y + w, 0), l2 = proj(x + l, y + w, 0), l3 = proj(x + l, y + w, h), l4 = proj(x, y + w, h);
+        svgs += `<polygon points="${toPts([l1, l2, l3, l4])}" fill="${col.bg}" stroke="${col.fg}" stroke-width="1" stroke-linejoin="round"/>`;
+        svgs += `<polygon points="${toPts([l1, l2, l3, l4])}" fill="black" fill-opacity="0.05" stroke="none"/>`;
+
+        const r1 = proj(x + l, y, 0), r2 = proj(x + l, y + w, 0), r3 = proj(x + l, y + w, h), r4 = proj(x + l, y, h);
+        svgs += `<polygon points="${toPts([r1, r2, r3, r4])}" fill="${col.bg}" stroke="${col.fg}" stroke-width="1" stroke-linejoin="round"/>`;
+        svgs += `<polygon points="${toPts([r1, r2, r3, r4])}" fill="black" fill-opacity="0.15" stroke="none"/>`;
+      }
+
+      return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:800px;display:block;">
+        ${svgs}
+      </svg>`;
     }
 
     function renderViz(floorPlan, container, colorMap) {
@@ -929,11 +1018,11 @@
     }
 
     function runPacking() {
-      const container = { length: parseFloat(document.getElementById('cL').value), width: parseFloat(document.getElementById('cW').value), height: parseFloat(document.getElementById('cH').value) };
-      const out = document.getElementById('results');
-      if (!orderLines.length) { out.innerHTML = '<div class="err"><i class="ti ti-alert-circle"></i> Add at least one product to the order.</div>'; return; }
+      const container = { length: parseFloat($('cL').value), width: parseFloat($('cW').value), height: parseFloat($('cH').value) };
+      const out = $('results');
+      if (!orderLines.length) return out.innerHTML = '<div class="err"><i class="ti ti-alert-circle"></i> Add at least one product.</div>';
       const bad = orderLines.filter(l => !catalogue[l.code]);
-      if (bad.length) { out.innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> Codes not in catalogue: ${bad.map(l => l.code).join(', ')}.</div>`; return; }
+      if (bad.length) return out.innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> Not in catalogue: ${bad.map(l => l.code).join(', ')}.</div>`;
 
       const order = orderLines.map(l => {
         const d = catalogue[l.code];
@@ -948,6 +1037,7 @@
 
       const m = result.metrics;
       const viz = renderViz(result.floor_plan, container, colorMap);
+      const isoViz = renderIsoViz(result.floor_plan, container, colorMap);
 
       let detail = '';
       for (const [code, positions] of Object.entries(result.placement_plan)) {
@@ -983,6 +1073,10 @@
     <div class="s">
       <div class="st"><i class="ti ti-layout-board" style="font-size:20px;color:var(--color-brand);"></i> Floor plan (top view)</div>
       <div class="card" style="overflow-x:auto;display:flex;justify-content:center;padding:2rem;">${viz}</div>
+    </div>
+    <div class="s">
+      <div class="st"><i class="ti ti-cube" style="font-size:20px;color:var(--color-brand);"></i> Stacking plan (3D view)</div>
+      <div class="card" style="overflow-x:auto;display:flex;justify-content:center;padding:2rem;">${isoViz}</div>
     </div>
     <div class="s">
       <div class="st"><i class="ti ti-list-details" style="font-size:20px;color:var(--color-brand);"></i> Placement detail</div>
