@@ -607,6 +607,18 @@
       border: 1px solid var(--color-border-secondary);
       margin-bottom: 16px;
     }
+
+    details.detail-box summary {
+      list-style: none;
+    }
+
+    details.detail-box summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.detail-box[open] summary i.ti-chevron-down {
+      transform: rotate(180deg);
+    }
   </style>
 </head>
 
@@ -652,27 +664,7 @@
   </div>
 
   <div class="s">
-    <div class="st"><span class="st-num">2</span>Select container</div>
-    <div class="card">
-      <div class="row" style="margin-bottom:20px;">
-        <label style="font-size:14px;font-weight:600;color:var(--color-text-primary);flex-shrink:0;">Preset:</label>
-        <select class="sel-small" id="preset" onchange="applyPreset()" style="max-width: 250px;">
-          <option value="20ft" selected>20ft Standard</option>
-          <option value="40ft">40ft Standard</option>
-          <option value="40hc">40ft High Cube</option>
-          <option value="custom">Custom Dimensions</option>
-        </select>
-      </div>
-      <div class="g3">
-        <div class="fld"><label>Length (cm)</label><input type="number" id="cL" value="590" min="1"></div>
-        <div class="fld"><label>Width (cm)</label><input type="number" id="cW" value="235" min="1"></div>
-        <div class="fld"><label>Height (cm)</label><input type="number" id="cH" value="239" min="1"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="s">
-    <div class="st"><span class="st-num">3</span> Order</div>
+    <div class="st"><span class="st-num">2</span> Order</div>
     <div class="card">
       <div
         style="display:grid;grid-template-columns:110px 1fr 100px 40px;gap:16px;margin-bottom:12px;padding-bottom:12px;border-bottom:2px solid var(--color-border-secondary);">
@@ -712,15 +704,12 @@
   <script>
     const $ = id => document.getElementById(id);
     const PRESETS = { '20ft': [590, 235, 239], '40ft': [1203, 235, 239], '40hc': [1203, 235, 269] };
+    const WEIGHT_LIMITS = { '20ft': 21770, '40ft': 26730, '40hc': 26540 };
+    const CONTAINER_LABELS = { '20ft': '20ft Standard', '40ft': '40ft Standard', '40hc': '40ft High Cube' };
     const COLORS = ['#185FA5', '#0F6E56', '#993C1D', '#993556', '#3B6D11', '#854F0B'];
     const COLORS_L = ['#E6F1FB', '#E1F5EE', '#FAECE7', '#FBEAF0', '#EAF3DE', '#FAEEDA'];
 
     let catalogue = {}, catCodes = [], orderLines = [], lineCount = 0, acIdx = -1;
-
-    function applyPreset() {
-      const v = $('preset').value;
-      if (PRESETS[v]) [$('cL').value, $('cW').value, $('cH').value] = PRESETS[v];
-    }
 
     function dzEv(e, cls, add) { e.preventDefault(); $('drop-zone').classList[add ? 'add' : 'remove'](cls); }
     function onDrop(e) { e.preventDefault(); dzEv(e, 'drag', false); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); }
@@ -1017,8 +1006,161 @@
   </svg>`;
     }
 
+    /* ── Auto container-selection algorithm ── */
+
+    function selectContainers(orderItems) {
+      // Clone items so we can mutate case_count as we assign them to containers
+      let remaining = orderItems.map(item => ({ ...item }));
+      // Sort by product code to group same products together
+      remaining.sort((a, b) => a.code.localeCompare(b.code));
+
+      const containers = [];
+      const typeOrder = ['20ft', '40ft', '40hc'];
+
+      while (remaining.length > 0) {
+        let selectedType = null;
+        let packResult = null;
+
+        // Try each container size from smallest to largest
+        for (const type of typeOrder) {
+          const [cL, cW, cH] = PRESETS[type];
+          const container = { length: cL, width: cW, height: cH };
+          const result = packOrder(remaining, container);
+          if (result.success) {
+            selectedType = type;
+            packResult = result;
+            break;
+          }
+        }
+
+        if (selectedType) {
+          // Everything remaining fits in one container — enforce weight limit
+          const wl = WEIGHT_LIMITS[selectedType];
+          if (packResult.metrics.total_weight > wl) {
+            const { packed, overflow } = enforceWeightLimit(remaining, selectedType);
+            const [cL, cW, cH] = PRESETS[selectedType];
+            const result = packOrder(packed, { length: cL, width: cW, height: cH });
+            containers.push({ type: selectedType, result, container: { length: cL, width: cW, height: cH } });
+            remaining = overflow;
+          } else {
+            const [cL, cW, cH] = PRESETS[selectedType];
+            containers.push({ type: selectedType, result: packResult, container: { length: cL, width: cW, height: cH } });
+            remaining = [];
+          }
+        } else {
+          // Doesn't fit in any single container — greedily fill the largest (40hc)
+          const { packed, overflow } = greedyFill(remaining, '40hc');
+          if (packed.length === 0) {
+            // Edge case: even a single item doesn't fit — report error on first remaining item
+            return { success: false, reason: `Product "${remaining[0].code}" cannot physically fit in any container.` };
+          }
+          const [cL, cW, cH] = PRESETS['40hc'];
+          const result = packOrder(packed, { length: cL, width: cW, height: cH });
+          containers.push({ type: '40hc', result, container: { length: cL, width: cW, height: cH } });
+          remaining = overflow;
+        }
+      }
+
+      return { success: true, containers };
+    }
+
+    /**
+     * Greedily pack as many items as possible into a container of the given type.
+     * Preserves product grouping: adds items in order (already sorted by code),
+     * trying to keep entire products together. When a product doesn't fit entirely,
+     * binary-searches for the max case_count of that product that still fits.
+     * Weight limit is also enforced.
+     */
+    function greedyFill(items, type) {
+      const [cL, cW, cH] = PRESETS[type];
+      const container = { length: cL, width: cW, height: cH };
+      const wl = WEIGHT_LIMITS[type];
+
+      const packed = [];
+      const overflow = [];
+
+      for (const item of items) {
+        // Try adding entire item to the packed set
+        const trial = [...packed, { ...item }];
+        const result = packOrder(trial, container);
+        if (result.success && result.metrics.total_weight <= wl) {
+          packed.push({ ...item });
+        } else {
+          // Binary search for max cases of this item that fit
+          let lo = 0, hi = item.case_count, best = 0;
+          while (lo <= hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            if (mid === 0) { lo = 1; continue; }
+            const trial2 = [...packed, { ...item, case_count: mid }];
+            const r2 = packOrder(trial2, container);
+            if (r2.success && r2.metrics.total_weight <= wl) {
+              best = mid;
+              lo = mid + 1;
+            } else {
+              hi = mid - 1;
+            }
+          }
+          if (best > 0) {
+            packed.push({ ...item, case_count: best });
+            overflow.push({ ...item, case_count: item.case_count - best });
+          } else {
+            overflow.push({ ...item });
+          }
+        }
+      }
+
+      return { packed, overflow };
+    }
+
+    /**
+     * Remove items from the end until total weight is at or below the weight limit.
+     * Returns { packed, overflow } arrays of order items.
+     */
+    function enforceWeightLimit(items, type) {
+      const [cL, cW, cH] = PRESETS[type];
+      const container = { length: cL, width: cW, height: cH };
+      const wl = WEIGHT_LIMITS[type];
+
+      // Start with all items and remove from the end
+      const packed = items.map(i => ({ ...i }));
+      const overflow = [];
+
+      while (packed.length > 0) {
+        const result = packOrder(packed, container);
+        if (result.success && result.metrics.total_weight <= wl) {
+          return { packed, overflow };
+        }
+        // Remove last item (or reduce its cases) to fit weight
+        const last = packed[packed.length - 1];
+        if (last.case_count > 1) {
+          // Binary search for max cases that fit weight
+          let lo = 1, hi = last.case_count, best = 0;
+          while (lo <= hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            const trial = [...packed.slice(0, -1), { ...last, case_count: mid }];
+            const r = packOrder(trial, container);
+            if (r.success && r.metrics.total_weight <= wl) {
+              best = mid;
+              lo = mid + 1;
+            } else {
+              hi = mid - 1;
+            }
+          }
+          if (best > 0) {
+            overflow.unshift({ ...last, case_count: last.case_count - best });
+            packed[packed.length - 1] = { ...last, case_count: best };
+            return { packed, overflow };
+          }
+        }
+        // Remove entire item
+        packed.pop();
+        overflow.unshift(last);
+      }
+
+      return { packed, overflow };
+    }
+
     function runPacking() {
-      const container = { length: parseFloat($('cL').value), width: parseFloat($('cW').value), height: parseFloat($('cH').value) };
       const out = $('results');
       if (!orderLines.length) return out.innerHTML = '<div class="err"><i class="ti ti-alert-circle"></i> Add at least one product.</div>';
       const bad = orderLines.filter(l => !catalogue[l.code]);
@@ -1029,59 +1171,100 @@
         return { code: l.code, name: d.name, case_count: l.cases, case_length: d.case_length_cm, case_width: d.case_width_cm, case_height: d.case_height_cm, gross_weight_kg: d.gross_weight_kg, max_stack_height: d.max_stack_height };
       });
 
-      const result = packOrder(order, container);
-      if (!result.success) { out.innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> ${result.reason}</div>`; return; }
+      const selResult = selectContainers(order);
+      if (!selResult.success) { out.innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> ${selResult.reason}</div>`; return; }
 
-      const colorMap = {}; let ci = 0;
-      for (const code of Object.keys(result.placement_plan)) { colorMap[code] = { fg: COLORS[ci % COLORS.length], bg: COLORS_L[ci % COLORS_L.length] }; ci++; }
-
-      const m = result.metrics;
-      const viz = renderViz(result.floor_plan, container, colorMap);
-      const isoViz = renderIsoViz(result.floor_plan, container, colorMap);
-
-      let detail = '';
-      for (const [code, positions] of Object.entries(result.placement_plan)) {
-        const col = colorMap[code];
-        const tot = positions.reduce((s, p) => s + p.cases_in_stack, 0);
-        const wt = positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0).toFixed(2);
-        detail += `<div class="detail-box">
-      <div class="row" style="gap:12px;margin-bottom:12px;">
-        <span style="width:16px;height:16px;border-radius:4px;background:${col.bg};border:2px solid ${col.fg};flex-shrink:0;"></span>
-        <span class="code-pill">${code}</span>
-        <span style="font-size:15px;font-weight:600;color:var(--color-text-primary);">${positions[0].name}</span>
-        <span class="badge" style="background:${col.bg};color:${col.fg};margin-left:auto;border:1px solid ${col.fg}40;">${tot} cases · ${wt} kg · ${positions.length} stack${positions.length !== 1 ? 's' : ''}</span>
-      </div>`;
-        for (const [i, p] of positions.entries()) {
-          detail += `<div style="font-size:13px;color:var(--color-text-secondary);margin-left:28px;line-height:1.8;position:relative;">
-        <span style="position:absolute;left:-16px;color:#cbd5e1;">↳</span>
-        <strong style="color:var(--color-text-primary);">Stack ${i + 1}:</strong> position (${p.x.toFixed(0)}, ${p.y.toFixed(0)}) — ${p.footprint_l.toFixed(1)}×${p.footprint_w.toFixed(1)}cm footprint · ${p.cases_in_stack} cases · ${p.physical_height.toFixed(1)}cm tall · ${(p.gross_weight_kg * p.cases_in_stack).toFixed(2)} kg</div>`;
-        }
-        detail += '</div>';
+      // Build global color map across all containers
+      const allCodes = new Set();
+      for (const c of selResult.containers) {
+        for (const code of Object.keys(c.result.placement_plan)) allCodes.add(code);
       }
+      const colorMap = {}; let ci = 0;
+      for (const code of allCodes) { colorMap[code] = { fg: COLORS[ci % COLORS.length], bg: COLORS_L[ci % COLORS_L.length] }; ci++; }
 
-      out.innerHTML = `
+      // Aggregate metrics
+      const totalCases = selResult.containers.reduce((s, c) => s + c.result.metrics.total_cases, 0);
+      const totalStacks = selResult.containers.reduce((s, c) => s + c.result.metrics.stacks, 0);
+      const totalWeight = selResult.containers.reduce((s, c) => s + c.result.metrics.total_weight, 0);
+      const containerCount = selResult.containers.length;
+
+      // Container mix summary
+      const typeCounts = {};
+      for (const c of selResult.containers) typeCounts[c.type] = (typeCounts[c.type] || 0) + 1;
+      const mixSummary = Object.entries(typeCounts).map(([t, n]) => `${n}× ${CONTAINER_LABELS[t]}`).join(' + ');
+
+      let html = `
     <div class="s">
       <div class="st"><i class="ti ti-chart-bar" style="font-size:20px;color:var(--color-brand);"></i> Results Summary</div>
       <div class="metric-grid">
-        <div class="metric"><div class="val">${m.total_cases}</div><div class="lbl">cases packed</div></div>
-        <div class="metric"><div class="val">${m.stacks}</div><div class="lbl">stacks placed</div></div>
-        <div class="metric"><div class="val">${m.utilisation}%</div><div class="lbl">floor utilisation</div></div>
-        <div class="metric"><div class="val">${m.total_weight.toFixed(0)} <span style="font-size:18px;">kg</span></div><div class="lbl">gross weight</div></div>
+        <div class="metric"><div class="val">${containerCount}</div><div class="lbl">container${containerCount !== 1 ? 's' : ''}</div></div>
+        <div class="metric"><div class="val">${totalCases}</div><div class="lbl">cases packed</div></div>
+        <div class="metric"><div class="val">${totalStacks}</div><div class="lbl">stacks placed</div></div>
+        <div class="metric"><div class="val">${totalWeight.toFixed(0)} <span style="font-size:18px;">kg</span></div><div class="lbl">gross weight</div></div>
       </div>
-      <div class="ok" style="margin-bottom:1.5rem;"><i class="ti ti-circle-check-filled" style="font-size:20px;"></i> Order fits — all products placed successfully</div>
-    </div>
-    <div class="s">
-      <div class="st"><i class="ti ti-layout-board" style="font-size:20px;color:var(--color-brand);"></i> Floor plan (top view)</div>
-      <div class="card" style="overflow-x:auto;display:flex;justify-content:center;padding:2rem;">${viz}</div>
-    </div>
-    <div class="s">
-      <div class="st"><i class="ti ti-cube" style="font-size:20px;color:var(--color-brand);"></i> Stacking plan (3D view)</div>
-      <div class="card" style="overflow-x:auto;display:flex;justify-content:center;padding:2rem;">${isoViz}</div>
-    </div>
-    <div class="s">
-      <div class="st"><i class="ti ti-list-details" style="font-size:20px;color:var(--color-brand);"></i> Placement detail</div>
+      <div class="ok" style="margin-bottom:1.5rem;"><i class="ti ti-circle-check-filled" style="font-size:20px;"></i> ${mixSummary}</div>
+    </div>`;
+
+      // Per-container results
+      for (const [idx, ctn] of selResult.containers.entries()) {
+        const cLabel = CONTAINER_LABELS[ctn.type];
+        const cDims = ctn.container;
+        const m = ctn.result.metrics;
+        const wl = WEIGHT_LIMITS[ctn.type];
+        const weightPct = Math.round(m.total_weight / wl * 100);
+        const weightOk = m.total_weight <= wl;
+        const weightBadge = weightOk
+          ? `<span class="badge" style="background:var(--color-background-success);color:var(--color-text-success);border:1px solid #bbf7d0;">${m.total_weight.toFixed(0)} / ${wl.toLocaleString()} kg (${weightPct}%)</span>`
+          : `<span class="badge" style="background:var(--color-background-danger);color:var(--color-text-danger);border:1px solid #fecaca;">⚠ ${m.total_weight.toFixed(0)} / ${wl.toLocaleString()} kg — OVER LIMIT</span>`;
+
+        const viz = renderViz(ctn.result.floor_plan, cDims, colorMap);
+        const isoViz = renderIsoViz(ctn.result.floor_plan, cDims, colorMap);
+
+        let detail = '';
+        for (const [code, positions] of Object.entries(ctn.result.placement_plan)) {
+          const col = colorMap[code];
+          const tot = positions.reduce((s, p) => s + p.cases_in_stack, 0);
+          const wt = positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0).toFixed(2);
+          detail += `<details class="detail-box">
+        <summary class="row" style="gap:12px;cursor:pointer;user-select:none;">
+          <span style="width:16px;height:16px;border-radius:4px;background:${col.bg};border:2px solid ${col.fg};flex-shrink:0;"></span>
+          <span class="code-pill">${code}</span>
+          <span style="font-size:15px;font-weight:600;color:var(--color-text-primary);">${positions[0].name}</span>
+          <span class="badge" style="background:${col.bg};color:${col.fg};margin-left:auto;border:1px solid ${col.fg}40;">${tot} cases · ${wt} kg · ${positions.length} stack${positions.length !== 1 ? 's' : ''}</span>
+          <i class="ti ti-chevron-down" style="color:var(--color-text-tertiary);transition:transform 0.2s;"></i>
+        </summary>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--color-border-secondary);">`;
+          for (const [i, p] of positions.entries()) {
+            detail += `<div style="font-size:13px;color:var(--color-text-secondary);margin-left:28px;line-height:1.8;position:relative;">
+          <span style="position:absolute;left:-16px;color:#cbd5e1;">↳</span>
+          <strong style="color:var(--color-text-primary);">Stack ${i + 1}:</strong> position (${p.x.toFixed(0)}, ${p.y.toFixed(0)}) — ${p.footprint_l.toFixed(1)}×${p.footprint_w.toFixed(1)}cm footprint · ${p.cases_in_stack} cases · ${p.physical_height.toFixed(1)}cm tall · ${(p.gross_weight_kg * p.cases_in_stack).toFixed(2)} kg</div>`;
+          }
+          detail += '</div></details>';
+        }
+
+        html += `
+    <div class="s" style="border-top:2px solid var(--color-border-secondary);padding-top:2rem;margin-top:1rem;">
+      <div class="st">
+        <i class="ti ti-package" style="font-size:20px;color:var(--color-brand);"></i>
+        Container ${idx + 1} — ${cLabel}
+        ${weightBadge}
+      </div>
+      <div class="metric-grid" style="margin-bottom:1.5rem;">
+        <div class="metric"><div class="val">${m.total_cases}</div><div class="lbl">cases</div></div>
+        <div class="metric"><div class="val">${m.stacks}</div><div class="lbl">stacks</div></div>
+        <div class="metric"><div class="val">${m.utilisation}%</div><div class="lbl">floor utilisation</div></div>
+        <div class="metric"><div class="val">${m.total_weight.toFixed(0)} <span style="font-size:18px;">kg</span></div><div class="lbl">weight</div></div>
+      </div>
+      <div class="st" style="font-size:14px;"><i class="ti ti-layout-board" style="font-size:18px;color:var(--color-brand);"></i> Floor plan</div>
+      <div class="card" style="overflow-x:auto;display:flex;justify-content:center;padding:2rem;margin-bottom:1rem;">${viz}</div>
+      <div class="st" style="font-size:14px;"><i class="ti ti-cube" style="font-size:18px;color:var(--color-brand);"></i> 3D view</div>
+      <div class="card" style="overflow-x:auto;display:flex;justify-content:center;padding:2rem;margin-bottom:1rem;">${isoViz}</div>
+      <div class="st" style="font-size:14px;"><i class="ti ti-list-details" style="font-size:18px;color:var(--color-brand);"></i> Placement detail</div>
       <div class="card">${detail}</div>
     </div>`;
+      }
+
+      out.innerHTML = html;
     }
 
     renderOrderList();
