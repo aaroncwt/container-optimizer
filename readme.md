@@ -151,8 +151,8 @@ FUNCTION packOrder(order, container):
     IF any item.case_height > container.height:
         RETURN failure "Item too tall"
 
-    // 2. Sort items by base area (length * width) descending
-    sortedOrder = sort order by (case_length * case_width) descending
+    // 2. Sort items by quantities descending
+    sortedOrder = sort order by case_count descending
 
     // 3. Form stacks
     stackList = empty list

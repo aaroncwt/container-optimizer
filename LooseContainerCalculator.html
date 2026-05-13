@@ -912,7 +912,7 @@
         return { success: false, reason: `${impossible.map(i => `"${i.code}" (case height ${i.case_height.toFixed(1)}cm > container ${cH}cm)`).join(', ')} cannot fit even as a single case.` };
       }
 
-      const sorted = [...order].sort((a, b) => (b.case_length * b.case_width) - (a.case_length * a.case_width));
+      const sorted = [...order].sort((a, b) => b.case_count - a.case_count);
 
       const stackList = [];
       for (const item of sorted) {
