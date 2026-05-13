@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Loose Container Optimizer</title>
+  <title>Loose Container Calculator</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
   <style>
@@ -280,9 +280,9 @@
 
     .ok {
       font-size: 14px;
-      color: var(--color-text-success);
-      background: var(--color-background-success);
-      border: 1px solid #bbf7d0;
+      color: #000000;
+      background: #ffffff;
+      border: 1px solid #E1E8F1;
       border-radius: var(--border-radius-md);
       padding: 14px 18px;
       display: flex;
@@ -641,10 +641,8 @@
     .metric-flat-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 24px;
-      background: var(--color-background-secondary);
-      padding: 1.5rem;
-      border-radius: var(--border-radius-lg);
+      gap: 32px;
+      margin-bottom: 0.5rem;
     }
 
     .metric-flat {
@@ -666,6 +664,20 @@
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
+
+    @keyframes spin {
+      from {
+        transform: rotate(0deg);
+      }
+
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .animate-spin {
+      animation: spin 1s linear infinite;
+    }
   </style>
 </head>
 
@@ -675,7 +687,7 @@
     enter codes and case counts to pack an order.</h2>
 
   <div class="app-header">
-    <h1 class="app-title">Loose Container Optimizer</h1>
+    <h1 class="app-title">Loose Container Calculator</h1>
   </div>
   <div class="s">
     <div class="st"><span class="st-num">1</span>Upload Product Master</div>
@@ -955,7 +967,6 @@
         success: true, placement_plan: byCode, floor_plan: floorPlan,
         metrics: {
           stacks: floorPlan.length,
-          utilisation: Math.round(usedArea / (cL * cW) * 100),
           volume_utilisation: Math.round(totalVolumeCm3 / (maxCBM * 1000000) * 100),
           total_cbm: totalVolumeCm3 / 1000000,
           container_cbm: maxCBM,
@@ -1028,10 +1039,6 @@
           svgs += `<polygon points="${toPts([r1, r2, r3, r4])}" fill="${col.bg}" stroke="${col.fg}" stroke-width="1" stroke-linejoin="round"/>`;
           svgs += `<polygon points="${toPts([r1, r2, r3, r4])}" fill="black" fill-opacity="0.15" stroke="none"/>`;
         }
-
-        const cx = x + l / 2, cy = y + w / 2;
-        const tc = proj(cx, cy, h);
-        svgs += `<text x="${tc.x.toFixed(1)}" y="${(tc.y + 4).toFixed(1)}" text-anchor="middle" font-size="14" font-weight="bold" fill="${col.fg}">${col.num}</text>`;
       }
 
       return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:800px;display:block;">
@@ -1217,109 +1224,150 @@
     }
 
     function runPacking() {
-      const out = $('results');
-      if (!orderLines.length) return out.innerHTML = '<div class="err"><i class="ti ti-alert-circle"></i> Add at least one product.</div>';
-      const bad = orderLines.filter(l => !catalogue[l.code]);
-      if (bad.length) return out.innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> Not in catalogue: ${bad.map(l => l.code).join(', ')}.</div>`;
+      const btn = $('run-btn');
+      const originalContent = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="ti ti-loader-2 animate-spin" style="font-size: 24px;"></i> Processing...';
 
-      const order = orderLines.map(l => {
-        const d = catalogue[l.code];
-        return { code: l.code, name: d.name, case_count: l.cases, case_length: d.case_length_cm, case_width: d.case_width_cm, case_height: d.case_height_cm, gross_weight_kg: d.gross_weight_kg, max_stack_height: d.max_stack_height };
-      });
+      setTimeout(() => {
+        const out = $('results');
+        if (!orderLines.length) {
+          btn.disabled = false;
+          btn.innerHTML = originalContent;
+          return out.innerHTML = '<div class="err"><i class="ti ti-alert-circle"></i> Add at least one product.</div>';
+        }
+        const bad = orderLines.filter(l => !catalogue[l.code]);
+        if (bad.length) {
+          btn.disabled = false;
+          btn.innerHTML = originalContent;
+          return out.innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> Not in catalogue: ${bad.map(l => l.code).join(', ')}.</div>`;
+        }
 
-      const selResult = selectContainers(order);
-      if (!selResult.success) { out.innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> ${selResult.reason}</div>`; return; }
+        const order = orderLines.map(l => {
+          const d = catalogue[l.code];
+          return { code: l.code, name: d.name, case_count: l.cases, case_length: d.case_length_cm, case_width: d.case_width_cm, case_height: d.case_height_cm, gross_weight_kg: d.gross_weight_kg, max_stack_height: d.max_stack_height };
+        });
 
-      // Build global color map across all containers
-      const allCodes = new Set();
-      for (const c of selResult.containers) {
-        for (const code of Object.keys(c.result.placement_plan)) allCodes.add(code);
-      }
-      const colorMap = {}; let ci = 0;
-      for (const code of allCodes) { colorMap[code] = { fg: COLORS[ci % COLORS.length], bg: COLORS_L[ci % COLORS_L.length], num: ci + 1 }; ci++; }
+        const selResult = selectContainers(order);
+        if (!selResult.success) {
+          btn.disabled = false;
+          btn.innerHTML = originalContent;
+          out.innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> ${selResult.reason}</div>`;
+          return;
+        }
 
-      // Aggregate metrics
-      const totalCases = selResult.containers.reduce((s, c) => s + c.result.metrics.total_cases, 0);
-      const totalStacks = selResult.containers.reduce((s, c) => s + c.result.metrics.stacks, 0);
-      const totalWeight = selResult.containers.reduce((s, c) => s + c.result.metrics.total_weight, 0);
-      const containerCount = selResult.containers.length;
+        // Build global color map across all containers
+        const allCodes = new Set();
+        for (const c of selResult.containers) {
+          for (const code of Object.keys(c.result.placement_plan)) allCodes.add(code);
+        }
+        const colorMap = {}; let ci = 0;
+        for (const code of allCodes) { colorMap[code] = { fg: COLORS[ci % COLORS.length], bg: COLORS_L[ci % COLORS_L.length], num: ci + 1 }; ci++; }
 
-      // Container mix summary
-      const typeCounts = {};
-      for (const c of selResult.containers) typeCounts[c.type] = (typeCounts[c.type] || 0) + 1;
-      const mixSummary = Object.entries(typeCounts).map(([t, n]) => `${n}× ${CONTAINER_LABELS[t]}`).join(' + ');
+        // Aggregate metrics
+        const totalCases = selResult.containers.reduce((s, c) => s + c.result.metrics.total_cases, 0);
+        const totalStacks = selResult.containers.reduce((s, c) => s + c.result.metrics.stacks, 0);
+        const totalWeight = selResult.containers.reduce((s, c) => s + c.result.metrics.total_weight, 0);
+        const containerCount = selResult.containers.length;
 
-      let html = `
+        // Container table for summary
+        const containerTableHtml = `
+          <div class="tbl-container" style="margin-top: 1rem;">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th style="width: 40px;">#</th>
+                  <th>Type</th>
+                  <th style="text-align: center;">Cases</th>
+                  <th style="text-align: center;">Stacks</th>
+                  <th style="text-align: center;">CBM Util.</th>
+                  <th style="text-align: center;">Volume (m³)</th>
+                  <th style="text-align: center;">Weight (kg)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${selResult.containers.map((c, i) => {
+          const m = c.result.metrics;
+          const wl = WEIGHT_LIMITS[c.type];
+          return `
+                  <tr>
+                    <td style="font-family: var(--font-mono); font-weight: 700; color: var(--color-text-tertiary);">${i + 1}</td>
+                    <td style="font-weight: 600;">${CONTAINER_LABELS[c.type]}</td>
+                    <td style="text-align: center;">${m.total_cases}</td>
+                    <td style="text-align: center;">${m.stacks}</td>
+                    <td style="text-align: center; color:${m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)'}; font-weight: 600;">${m.volume_utilisation}%</td>
+                    <td style="text-align: center;">${m.total_cbm.toFixed(1)} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${m.container_cbm.toFixed(1)}</span></td>
+                    <td style="text-align: center;">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${wl.toLocaleString()}</span></td>
+                  </tr>`;
+        }).join('')}
+              </tbody>
+            </table>
+          </div>`;
+
+        let html = `
     <div class="card" style="margin-bottom:3rem; padding: 2.5rem;">
       <div class="container-title" style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--color-border-secondary); padding-bottom: 1.5rem;">
         <i class="ti ti-chart-bar" style="font-size:24px;color:var(--color-brand);"></i> 
         Results Summary
       </div>
       
-      <div class="metric-flat-grid" style="margin-bottom: 1.5rem;">
+      <div class="metric-flat-grid">
         <div class="metric-flat"><div class="val">${containerCount}</div><div class="lbl">container${containerCount !== 1 ? 's' : ''}</div></div>
         <div class="metric-flat"><div class="val">${totalCases}</div><div class="lbl">cases packed</div></div>
-        <div class="metric-flat"><div class="val">${totalStacks}</div><div class="lbl">stacks placed</div></div>
-        <div class="metric-flat"><div class="val">${Math.round(totalWeight).toLocaleString()} <span style="font-size:16px;color:var(--color-text-tertiary);">kg</span></div><div class="lbl">gross weight</div></div>
+        <div class="metric-flat"><div class="val">${totalWeight.toLocaleString()}</div><div class="lbl">total weight (kg)</div></div>
       </div>
       
-      <div class="ok"><i class="ti ti-circle-check-filled" style="font-size:20px;"></i> Packed in: ${mixSummary}</div>
+      <div style="margin-top: 2rem;">
+        <div class="container-section-title" style="margin-bottom: 12px;"><i class="ti ti-list"></i> Container Breakdown</div>
+        ${containerTableHtml}
+      </div>
     </div>`;
 
-      // Per-container results
-      for (const [idx, ctn] of selResult.containers.entries()) {
-        const cLabel = CONTAINER_LABELS[ctn.type];
-        const cDims = ctn.container;
-        const m = ctn.result.metrics;
-        const wl = WEIGHT_LIMITS[ctn.type];
-        const weightPct = Math.round(m.total_weight / wl * 100);
-        const weightOk = m.total_weight <= wl;
-        const weightBadge = weightOk
-          ? `<span class="badge" style="background:var(--color-background-success);color:var(--color-text-success);border:1px solid #bbf7d0;">${Math.round(m.total_weight).toLocaleString()} / ${wl.toLocaleString()} kg (${weightPct}%)</span>`
-          : `<span class="badge" style="background:var(--color-background-danger);color:var(--color-text-danger);border:1px solid #fecaca;">⚠ ${Math.round(m.total_weight).toLocaleString()} / ${wl.toLocaleString()} kg — OVER LIMIT</span>`;
+        // Per-container results
+        for (const [idx, ctn] of selResult.containers.entries()) {
+          const cLabel = CONTAINER_LABELS[ctn.type];
+          const cDims = ctn.container;
+          const m = ctn.result.metrics;
+          const wl = WEIGHT_LIMITS[ctn.type];
+          const viz = renderViz(ctn.result.floor_plan, cDims, colorMap);
+          const isoViz = renderIsoViz(ctn.result.floor_plan, cDims, colorMap);
 
-        const viz = renderViz(ctn.result.floor_plan, cDims, colorMap);
-        const isoViz = renderIsoViz(ctn.result.floor_plan, cDims, colorMap);
-
-        let detail = '';
-        for (const [code, positions] of Object.entries(ctn.result.placement_plan)) {
-          const col = colorMap[code];
-          const tot = positions.reduce((s, p) => s + p.cases_in_stack, 0);
-          const wt = positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0).toFixed(2);
-          detail += `<details class="detail-box">
+          let detail = '';
+          for (const [code, positions] of Object.entries(ctn.result.placement_plan)) {
+            const col = colorMap[code];
+            const tot = positions.reduce((s, p) => s + p.cases_in_stack, 0);
+            const wt = positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0).toFixed(2);
+            detail += `<details class="detail-box">
         <summary class="row" style="gap:12px;cursor:pointer;user-select:none;">
-          <span style="width:24px;height:24px;border-radius:4px;background:${col.bg};border:2px solid ${col.fg};flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;color:${col.fg};">${col.num}</span>
           <span class="code-pill">${code}</span>
           <span style="font-size:15px;font-weight:600;color:var(--color-text-primary);">${positions[0].name}</span>
           <span class="badge" style="background:${col.bg};color:${col.fg};margin-left:auto;border:1px solid ${col.fg}40;">${tot} cases · ${wt} kg · ${positions.length} stack${positions.length !== 1 ? 's' : ''}</span>
           <i class="ti ti-chevron-down" style="color:var(--color-text-tertiary);transition:transform 0.2s;"></i>
         </summary>
         <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--color-border-secondary);">`;
-          for (const [i, p] of positions.entries()) {
-            detail += `<div style="font-size:13px;color:var(--color-text-secondary);margin-left:28px;line-height:1.8;position:relative;">
+            for (const [i, p] of positions.entries()) {
+              detail += `<div style="font-size:13px;color:var(--color-text-secondary);margin-left:28px;line-height:1.8;position:relative;">
           <span style="position:absolute;left:-16px;color:#cbd5e1;">↳</span>
           <strong style="color:var(--color-text-primary);">Stack ${i + 1}:</strong> position (${p.x.toFixed(0)}, ${p.y.toFixed(0)}) — ${p.footprint_l.toFixed(1)}×${p.footprint_w.toFixed(1)}cm footprint · ${p.cases_in_stack} cases · ${p.physical_height.toFixed(1)}cm tall · ${(p.gross_weight_kg * p.cases_in_stack).toFixed(2)} kg</div>`;
+            }
+            detail += '</div></details>';
           }
-          detail += '</div></details>';
-        }
 
-        html += `
+          html += `
     <div class="card container-card">
       <div class="container-header">
         <div class="container-title">
           <i class="ti ti-package" style="font-size:24px;color:var(--color-brand);"></i>
           Container ${idx + 1} — ${cLabel}
         </div>
-        ${weightBadge}
       </div>
 
       <div class="metric-flat-grid">
         <div class="metric-flat"><div class="val">${m.total_cases}</div><div class="lbl">cases</div></div>
         <div class="metric-flat"><div class="val">${m.stacks}</div><div class="lbl">stacks</div></div>
-        <div class="metric-flat"><div class="val">${m.utilisation}%</div><div class="lbl">floor util.</div></div>
         <div class="metric-flat"><div class="val" style="color:${m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)'}">${m.volume_utilisation}%</div><div class="lbl">CBM util.</div></div>
         <div class="metric-flat"><div class="val">${m.total_cbm.toFixed(1)} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${m.container_cbm.toFixed(1)}</span></div><div class="lbl">volume (m³)</div></div>
-        <div class="metric-flat"><div class="val">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">kg</span></div><div class="lbl">gross weight</div></div>
+        <div class="metric-flat"><div class="val">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${wl.toLocaleString()}</span></div><div class="lbl">gross weight (kg)</div></div>
       </div>
 
       <div class="container-section">
@@ -1339,9 +1387,15 @@
         </div>
       </div>
     </div>`;
-      }
+        }
 
-      out.innerHTML = html;
+        out.innerHTML = html;
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+
+        // Scroll down slightly to display the results
+        window.scrollBy({ top: 400, behavior: 'smooth' });
+      }, 1000);
     }
 
     renderOrderList();
