@@ -30,7 +30,7 @@ FUNCTION selectContainers(orderItems):
 
         IF selectedType is found:
             // All remaining items physically fit into selectedType
-            IF packResult.total_weight > type.weightLimit:
+            IF packResult.metrics.total_weight > type.weightLimit:
                 // Weight limit exceeded, remove items until it's under the limit
                 packed, overflow = enforceWeightLimit(remainingItems, selectedType)
                 result = packOrder(packed, selectedType.dimensions)
@@ -67,7 +67,7 @@ FUNCTION greedyFill(items, type):
         trialPack = packed + item
         result = packOrder(trialPack, type.dimensions)
         
-        IF result is successful AND result.total_weight <= type.weightLimit:
+        IF result is successful AND result.metrics.total_weight <= type.weightLimit:
             add item to packed
         ELSE:
             // Binary search to find the maximum number of cases of this item that will fit
@@ -84,7 +84,7 @@ FUNCTION greedyFill(items, type):
                 trialPack = packed + (item with mid cases)
                 result = packOrder(trialPack, type.dimensions)
                 
-                IF result is successful AND result.total_weight <= type.weightLimit:
+                IF result is successful AND result.metrics.total_weight <= type.weightLimit:
                     bestCases = mid
                     low = mid + 1
                 ELSE:
@@ -109,7 +109,7 @@ FUNCTION enforceWeightLimit(items, type):
 
     WHILE packed is not empty:
         result = packOrder(packed, type.dimensions)
-        IF result is successful AND result.total_weight <= type.weightLimit:
+        IF result is successful AND result.metrics.total_weight <= type.weightLimit:
             RETURN packed, overflow
             
         lastItem = last element in packed
@@ -124,7 +124,7 @@ FUNCTION enforceWeightLimit(items, type):
                 trialPack = packed (without lastItem) + (lastItem with mid cases)
                 result = packOrder(trialPack, type.dimensions)
                 
-                IF result is successful AND result.total_weight <= type.weightLimit:
+                IF result is successful AND result.metrics.total_weight <= type.weightLimit:
                     bestCases = mid
                     low = mid + 1
                 ELSE:
@@ -222,5 +222,13 @@ FUNCTION packOrder(order, container):
         IF rightRect.area > 0: add rightRect to freeRects
         IF topRect.area > 0: add topRect to freeRects
 
-    RETURN success, floorPlan, placementMetrics
+    metrics = {
+        volume_utilisation: (totalVolume / container.maxCBM) * 100,
+        total_cbm: totalVolume,
+        container_cbm: container.maxCBM,
+        total_cases: sum of cases,
+        total_weight: sum of weight
+    }
+
+    RETURN success, floorPlan, metrics
 ```
