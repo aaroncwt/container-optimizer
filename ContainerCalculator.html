@@ -108,7 +108,7 @@
     }
 
     .st {
-      font-size: 16px;
+      font-size: 18px;
       font-weight: 600;
       color: var(--color-text-primary);
       margin-bottom: 16px;
@@ -116,19 +116,6 @@
       align-items: center;
       gap: 10px;
       letter-spacing: -0.01em;
-    }
-
-    .st-num {
-      display: inline-flex;
-      width: 28px;
-      height: 28px;
-      background: var(--color-brand);
-      border-radius: 50%;
-      color: white;
-      font-size: 14px;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
     }
 
     .card {
@@ -518,7 +505,7 @@
 
     .order-row {
       display: grid;
-      grid-template-columns: 110px 1fr 100px 40px;
+      grid-template-columns: 110px 1fr 100px 100px 40px;
       gap: 16px;
       align-items: center;
       padding: 12px 0;
@@ -550,7 +537,6 @@
     .code-pill {
       font-size: 13px;
       font-weight: 600;
-      background: #e2e8f0;
       color: #334155;
       padding: 4px 8px;
       border-radius: 6px;
@@ -777,7 +763,7 @@
     <h1 class="app-title">Loose Container Calculator</h1>
   </div>
   <div class="s">
-    <div class="st"><span class="st-num">1</span>Upload Product Master</div>
+    <div class="st">Upload Product Master</div>
     <div class="card">
       <div id="upload-ui">
         <div class="upload-zone" id="drop-zone" onclick="$('file-in').click()" ondragover="dzEv(event,'drag',true)"
@@ -787,7 +773,7 @@
           <div class="upload-hint">
             Required columns: <strong>Product Code</strong>, <strong>Product Name</strong>, <strong>Length</strong>,
             <strong>Width</strong>, <strong>Height</strong> (mm), <strong>Gross Weight</strong> (kg),
-            <strong>Max Stack</strong>
+            <strong>Cases Per Pallet</strong>, <strong>Max Stack</strong>
           </div>
         </div>
         <input type="file" id="file-in" accept=".xlsx,.xls" style="display:none" onchange="loadFile(this.files[0])">
@@ -806,13 +792,23 @@
   </div>
 
   <div class="s">
-    <div class="st"><span class="st-num">2</span> Order</div>
+    <div class="st">Order</div>
     <div class="card">
+      <div style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
+        <span style="font-weight: 600; font-size: 14px; color: var(--color-text-primary);">Loading Method:</span>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer;">
+          <input type="radio" name="loadMethod" value="loose" checked onchange="renderOrderList()"> Loose Load
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer;">
+          <input type="radio" name="loadMethod" value="palletized" onchange="renderOrderList()"> Palletized
+        </label>
+      </div>
       <div
-        style="display:grid;grid-template-columns:110px 1fr 100px 40px;gap:16px;margin-bottom:12px;padding-bottom:12px;border-bottom:2px solid var(--color-border-secondary);">
+        style="display:grid;grid-template-columns:110px 1fr 100px 100px 40px;gap:16px;margin-bottom:12px;padding-bottom:12px;border-bottom:2px solid var(--color-border-secondary);">
         <div class="col-h">SKU</div>
         <div class="col-h">Product Name</div>
         <div class="col-h" style="text-align:center;">Quantity, CS</div>
+        <div class="col-h" style="text-align:center;">Pallets</div>
         <div></div>
       </div>
       <div id="order-list" style="margin-bottom:16px;"></div>
@@ -855,6 +851,8 @@
     const WEIGHT_LIMITS = { '20ft': 21770, '40ft': 26730, '40hc': 26540 };
     const CBM_LIMITS = { '20ft': 28, '40ft': 58, '40hc': 68 };
     const CONTAINER_LABELS = { '20ft': '20ft Standard', '40ft': '40ft Standard', '40hc': '40ft High Cube' };
+    const PALLET_CAPACITY = { '20ft': 10, '40ft': 20, '40hc': 20 };
+    const EMPTY_PALLET_WEIGHT = 20;
     const COLORS = ['#dc2626', '#005EEF', '#16a34a', '#9333ea', '#ea580c', '#0d9488', '#db2777', '#ca8a04', '#4f46e5', '#65a30d'];
     const COLORS_L = ['#fee2e2', '#dbeafe', '#dcfce7', '#f3e8ff', '#ffedd5', '#ccfbf1', '#fce7f3', '#fef9c3', '#e0e7ff', '#ecfccb'];
 
@@ -890,6 +888,7 @@
       const colH = findCol(keys, 'height', 'hei');
       const colGW = findCol(keys, 'gross', 'weight', 'gw', 'kg');
       const colStack = findCol(keys, 'stack', 'max stack', 'max_stack');
+      const colCPP = findCol(keys, 'cases per pallet', 'cpp');
 
       const missing = [];
       if (!colCode) missing.push('Product Code');
@@ -898,7 +897,8 @@
       if (!colW) missing.push('Width');
       if (!colH) missing.push('Height');
       if (!colGW) missing.push('Gross Weight');
-      if (missing.length) throw new Error(`Could not find columns: ${missing.join(', ')}. Expected: Product Code, Product Name, Length, Width, Height (mm), Gross Weight (kg).`);
+      if (!colCPP) missing.push('Cases Per Pallet');
+      if (missing.length) throw new Error(`Could not find columns: ${missing.join(', ')}. Expected: Product Code, Product Name, Length, Width, Height (mm), Gross Weight (kg), Cases Per Pallet.`);
 
       catalogue = {}; catCodes = [];
       let skipped = 0;
@@ -909,9 +909,10 @@
         const wMM = parseFloat(r[colW]);
         const hMM = parseFloat(r[colH]);
         const gw = parseFloat(r[colGW]);
+        const cpp = parseInt(r[colCPP]);
         const ms = colStack && r[colStack] !== '' ? parseInt(r[colStack]) : undefined;
         if (!code || !name || isNaN(lMM) || isNaN(wMM) || isNaN(hMM) || isNaN(gw)) { skipped++; continue; }
-        catalogue[code] = { name, case_length_cm: lMM / 10, case_width_cm: wMM / 10, case_height_cm: hMM / 10, gross_weight_kg: gw, max_stack_height: ms };
+        catalogue[code] = { name, case_length_cm: lMM / 10, case_width_cm: wMM / 10, case_height_cm: hMM / 10, gross_weight_kg: gw, cases_per_pallet: isNaN(cpp) ? 0 : cpp, max_stack_height: ms };
         catCodes.push(code);
       }
       if (!catCodes.length) throw new Error('No valid product rows found. Check that Length, Width, Height, and Gross Weight are numbers.');
@@ -1043,17 +1044,44 @@
 
     function removeOrderLine(id) { orderLines = orderLines.filter(l => l.id !== id); renderOrderList(); }
 
+    function updateLineCases(id, val) {
+      const line = orderLines.find(x => x.id === id);
+      if (line) {
+        line.cases = parseInt(val) || 1;
+        renderOrderList();
+      }
+    }
+
     function renderOrderList() {
       const list = $('order-list');
+      const loadMethodEl = document.querySelector('input[name="loadMethod"]:checked');
+      const loadMethod = loadMethodEl ? loadMethodEl.value : 'loose';
       if (!orderLines.length) return list.innerHTML = '<div style="font-size:14px;color:var(--color-text-tertiary);padding:16px 0;text-align:center;border:1px dashed #cbd5e1;border-radius:var(--border-radius-md);">No products added yet.</div>';
       list.innerHTML = orderLines.map(l => {
         const prod = catalogue[l.code];
+        let warning = '';
+        let palletsHtml = '<div style="text-align:center;color:var(--color-text-tertiary);">-</div>';
+
+        if (prod && prod.cases_per_pallet > 0) {
+          const pallets = l.cases / prod.cases_per_pallet;
+          const isPartial = pallets % 1 !== 0;
+          palletsHtml = `<div style="text-align:center; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 4px;">
+            ${pallets.toFixed(2).replace(/\.?0+$/, '')}
+            ${isPartial ? `<i class="ti ti-package" style="color: var(--color-brand); font-size: 16px; cursor: help;" title="Partial pallet"></i>` : ''}
+          </div>`;
+        }
+
+        if (prod && loadMethod === 'palletized' && (!prod.cases_per_pallet || prod.cases_per_pallet <= 0)) {
+          warning = `<div style="margin-top: 4px; font-size: 12px; color: var(--color-text-danger); font-weight: 500;"><i class="ti ti-alert-circle"></i> Missing cases per pallet data</div>`;
+        }
         return `<div class="order-row">
           <div><span class="code-pill">${l.code}</span></div>
           <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             <span style="font-size:15px;font-weight:500;color:var(--color-text-primary);">${prod ? prod.name : '<span class="badge tag-err">not in catalogue</span>'}</span>
+            ${warning}
           </div>
-          <input type="number" value="${l.cases}" min="1" style="text-align:center;" onchange="orderLines.find(x=>x.id===${l.id}).cases=parseInt(this.value)||1">
+          <input type="number" value="${l.cases}" min="1" style="text-align:center;" onchange="updateLineCases(${l.id}, this.value)">
+          ${palletsHtml}
           <button class="rm" onclick="removeOrderLine(${l.id})" aria-label="Remove line"><i class="ti ti-trash"></i></button>
         </div>`;
       }).join('');
@@ -1405,6 +1433,97 @@
       return { packed, overflow };
     }
 
+    function selectPalletContainers(orderItems) {
+      let remainingPallets = [];
+      for (const item of orderItems) {
+        let casesRemaining = item.case_count;
+        while (casesRemaining > 0) {
+          const casesInPallet = Math.min(casesRemaining, item.cases_per_pallet);
+          remainingPallets.push({
+            code: item.code,
+            name: item.name,
+            cases: casesInPallet,
+            weight: casesInPallet * item.gross_weight_kg + EMPTY_PALLET_WEIGHT
+          });
+          casesRemaining -= casesInPallet;
+        }
+      }
+
+      remainingPallets.sort((a, b) => a.code.localeCompare(b.code));
+
+      const containers = [];
+      const typeOrder = ['20ft', '40ft', '40hc'];
+
+      while (remainingPallets.length > 0) {
+        let bestType = null;
+        let packedPallets = [];
+
+        for (const type of typeOrder) {
+          const cap = PALLET_CAPACITY[type];
+          const wl = WEIGHT_LIMITS[type];
+          const trialPallets = remainingPallets.slice(0, cap);
+          const totalWeight = trialPallets.reduce((s, p) => s + p.weight, 0);
+
+          if (remainingPallets.length <= cap && totalWeight <= wl) {
+            bestType = type;
+            packedPallets = trialPallets;
+            break;
+          }
+        }
+
+        if (bestType) {
+          remainingPallets = remainingPallets.slice(packedPallets.length);
+        } else {
+          bestType = '40hc';
+          const cap = PALLET_CAPACITY['40hc'];
+          const wl = WEIGHT_LIMITS['40hc'];
+
+          packedPallets = [];
+          let totalW = 0;
+          for (let i = 0; i < Math.min(remainingPallets.length, cap); i++) {
+            if (totalW + remainingPallets[i].weight <= wl) {
+              packedPallets.push(remainingPallets[i]);
+              totalW += remainingPallets[i].weight;
+            } else {
+              break;
+            }
+          }
+
+          if (packedPallets.length === 0) {
+            return { success: false, reason: `Pallet of "${remainingPallets[0].code}" exceeds weight limit.` };
+          }
+
+          remainingPallets = remainingPallets.slice(packedPallets.length);
+        }
+
+        const totalCases = packedPallets.reduce((s, p) => s + p.cases, 0);
+        const totalWeight = packedPallets.reduce((s, p) => s + p.weight, 0);
+
+        const placement_plan = {};
+        for (const p of packedPallets) {
+          if (!placement_plan[p.code]) placement_plan[p.code] = [];
+          placement_plan[p.code].push(p);
+        }
+
+        containers.push({
+          type: bestType,
+          result: {
+            success: true,
+            metrics: {
+              total_cases: totalCases,
+              pallets: packedPallets.length,
+              total_weight: totalWeight
+            },
+            placement_plan,
+            packed_pallets: packedPallets
+          },
+          container: { type: bestType }
+        });
+      }
+
+      return { success: true, containers };
+    }
+
     function runPacking() {
       const btn = $('run-btn');
       const originalContent = btn.innerHTML;
@@ -1427,10 +1546,21 @@
 
         const order = orderLines.map(l => {
           const d = catalogue[l.code];
-          return { code: l.code, name: d.name, case_count: l.cases, case_length: d.case_length_cm, case_width: d.case_width_cm, case_height: d.case_height_cm, gross_weight_kg: d.gross_weight_kg, max_stack_height: d.max_stack_height };
+          return { code: l.code, name: d.name, case_count: l.cases, case_length: d.case_length_cm, case_width: d.case_width_cm, case_height: d.case_height_cm, gross_weight_kg: d.gross_weight_kg, max_stack_height: d.max_stack_height, cases_per_pallet: d.cases_per_pallet };
         });
 
-        const selResult = selectContainers(order);
+        const loadMethod = document.querySelector('input[name="loadMethod"]:checked').value;
+
+        if (loadMethod === 'palletized') {
+          const badPallet = order.filter(item => !item.cases_per_pallet || item.cases_per_pallet <= 0);
+          if (badPallet.length) {
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+            return out.innerHTML = `<div class="err"><i class="ti ti-alert-triangle"></i> Cannot pack palletized: missing or invalid 'Cases Per Pallet' for ${badPallet.map(i => i.code).join(', ')}.</div>`;
+          }
+        }
+
+        const selResult = loadMethod === 'palletized' ? selectPalletContainers(order) : selectContainers(order);
         if (!selResult.success) {
           btn.disabled = false;
           btn.innerHTML = originalContent;
@@ -1448,7 +1578,6 @@
 
         // Aggregate metrics
         const totalCases = selResult.containers.reduce((s, c) => s + c.result.metrics.total_cases, 0);
-        const totalStacks = selResult.containers.reduce((s, c) => s + c.result.metrics.stacks, 0);
         const totalWeight = selResult.containers.reduce((s, c) => s + c.result.metrics.total_weight, 0);
         const containerCount = selResult.containers.length;
 
@@ -1461,9 +1590,7 @@
                   <th style="width: 40px;">#</th>
                   <th>Type</th>
                   <th style="text-align: center;">Cases</th>
-                  <th style="text-align: center;">Stacks</th>
-                  <th style="text-align: center;">CBM Util.</th>
-                  <th style="text-align: center;">Volume (m³)</th>
+                  ${loadMethod === 'loose' ? '<th style="text-align: center;">Stacks</th><th style="text-align: center;">CBM Util.</th><th style="text-align: center;">Volume (m³)</th>' : '<th style="text-align: center;">Pallets</th>'}
                   <th style="text-align: center;">Weight (kg)</th>
                 </tr>
               </thead>
@@ -1476,9 +1603,11 @@
                     <td style="font-family: var(--font-mono); font-weight: 700; color: var(--color-text-tertiary);">${i + 1}</td>
                     <td style="font-weight: 600;">${CONTAINER_LABELS[c.type]}</td>
                     <td style="text-align: center;">${m.total_cases}</td>
-                    <td style="text-align: center;">${m.stacks}</td>
-                    <td style="text-align: center; color:${m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)'}; font-weight: 600;">${m.volume_utilisation}%</td>
-                    <td style="text-align: center;">${m.total_cbm.toFixed(1)} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${m.container_cbm.toFixed(1)}</span></td>
+                    ${loadMethod === 'loose'
+              ? `<td style="text-align: center;">${m.stacks}</td>
+                         <td style="text-align: center; color:${m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)'}; font-weight: 600;">${m.volume_utilisation}%</td>
+                         <td style="text-align: center;">${m.total_cbm.toFixed(1)} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${m.container_cbm.toFixed(1)}</span></td>`
+              : `<td style="text-align: center;">${m.pallets} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${PALLET_CAPACITY[c.type]}</span></td>`}
                     <td style="text-align: center;">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${wl.toLocaleString()}</span></td>
                   </tr>`;
         }).join('')}
@@ -1486,16 +1615,18 @@
             </table>
           </div>`;
 
+        const totalPallets = loadMethod === 'palletized' ? selResult.containers.reduce((s, c) => s + c.result.metrics.pallets, 0) : 0;
         let html = `
     <div class="card" style="margin-bottom:3rem; padding: 2.5rem;">
       <div class="container-title" style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--color-border-secondary); padding-bottom: 1.5rem;">
         <i class="ti ti-chart-bar" style="font-size:24px;color:var(--color-brand);"></i> 
-        Results Summary
+        Summary: ${loadMethod === 'palletized' ? 'Palletized Load' : 'Loose Load'}
       </div>
       
       <div class="metric-flat-grid">
         <div class="metric-flat"><div class="val">${containerCount}</div><div class="lbl">container${containerCount !== 1 ? 's' : ''}</div></div>
         <div class="metric-flat"><div class="val">${totalCases}</div><div class="lbl">cases packed</div></div>
+        ${loadMethod === 'palletized' ? `<div class="metric-flat"><div class="val">${totalPallets}</div><div class="lbl">pallets</div></div>` : ''}
         <div class="metric-flat"><div class="val">${totalWeight.toLocaleString()}</div><div class="lbl">total weight (kg)</div></div>
       </div>
       
@@ -1505,16 +1636,21 @@
       </div>
     </div>`;
 
-        // Per-container results
-        for (const [idx, ctn] of selResult.containers.entries()) {
-          const cLabel = CONTAINER_LABELS[ctn.type];
-          const cDims = ctn.container;
-          const m = ctn.result.metrics;
-          const wl = WEIGHT_LIMITS[ctn.type];
-          const viz = renderViz(ctn.result.floor_plan, cDims, colorMap);
-          const isoViz = renderIsoViz(ctn.result.floor_plan, cDims, colorMap);
+        // Per-container results - skip for palletized as info is in summary
+        if (loadMethod === 'loose') {
+          for (const [idx, ctn] of selResult.containers.entries()) {
+            const cLabel = CONTAINER_LABELS[ctn.type];
+            const cDims = ctn.container;
+            const m = ctn.result.metrics;
+            const wl = WEIGHT_LIMITS[ctn.type];
 
-          let detail = `
+            let viz = '', isoViz = '';
+            if (loadMethod === 'loose') {
+              viz = renderViz(ctn.result.floor_plan, cDims, colorMap);
+              isoViz = renderIsoViz(ctn.result.floor_plan, cDims, colorMap);
+            }
+
+            let detail = `
             <table class="expandable-table">
               <thead>
                 <tr>
@@ -1523,17 +1659,17 @@
                   <th>Product Name</th>
                   <th style="text-align: center;">Total Cases</th>
                   <th style="text-align: center;">Total Weight (kg)</th>
-                  <th style="text-align: center;">Stacks</th>
+                  <th style="text-align: center;">${loadMethod === 'loose' ? 'Stacks' : 'Pallets'}</th>
                 </tr>
               </thead>
               <tbody>`;
 
-          for (const [code, positions] of Object.entries(ctn.result.placement_plan)) {
-            const col = colorMap[code];
-            const tot = positions.reduce((s, p) => s + p.cases_in_stack, 0);
-            const wt = positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0);
+            for (const [code, positions] of Object.entries(ctn.result.placement_plan)) {
+              const col = colorMap[code];
+              const tot = loadMethod === 'loose' ? positions.reduce((s, p) => s + p.cases_in_stack, 0) : positions.reduce((s, p) => s + p.cases, 0);
+              const wt = loadMethod === 'loose' ? positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0) : positions.reduce((s, p) => s + p.weight, 0);
 
-            detail += `
+              detail += `
               <tr class="product-row" onclick="toggleProductStacks(this)" style="background-color: ${col.bg};">
                 <td style="text-align: center;"><i class="ti ti-chevron-right" style="transition: transform 0.2s;"></i></td>
                 <td style="font-weight: 600;">${code}</td>
@@ -1548,10 +1684,10 @@
                     <table class="stack-table">
                       <thead>
                         <tr>
-                          <th>Stack #</th>
-                          <th>Footprint (L×W) (cm)</th>
+                          <th>${loadMethod === 'loose' ? 'Stack' : 'Pallet'} #</th>
+                          ${loadMethod === 'loose' ? '<th>Footprint (L×W) (cm)</th>' : ''}
                           <th style="text-align: center;">Cases</th>
-                          <th style="text-align: center;">Height (cm)</th>
+                          ${loadMethod === 'loose' ? '<th style="text-align: center;">Height (cm)</th>' : ''}
                           <th style="text-align: center;">Weight (kg)</th>
                         </tr>
                       </thead>
@@ -1559,10 +1695,10 @@
                         ${positions.map((p, i) => `
                           <tr>
                             <td style="font-weight: 600; color: var(--color-text-primary);">#${i + 1}</td>
-                            <td>${p.footprint_l.toFixed(1)} × ${p.footprint_w.toFixed(1)}</td>
-                            <td style="text-align: center;">${p.cases_in_stack}</td>
-                            <td style="text-align: center;">${p.physical_height.toFixed(1)}</td>
-                            <td style="text-align: center;">${(p.gross_weight_kg * p.cases_in_stack).toFixed(1)}</td>
+                            ${loadMethod === 'loose' ? `<td>${p.footprint_l.toFixed(1)} × ${p.footprint_w.toFixed(1)}</td>` : ''}
+                            <td style="text-align: center;">${loadMethod === 'loose' ? p.cases_in_stack : p.cases}</td>
+                            ${loadMethod === 'loose' ? `<td style="text-align: center;">${p.physical_height.toFixed(1)}</td>` : ''}
+                            <td style="text-align: center;">${loadMethod === 'loose' ? (p.gross_weight_kg * p.cases_in_stack).toFixed(1) : p.weight.toFixed(1)}</td>
                           </tr>
                         `).join('')}
                       </tbody>
@@ -1570,10 +1706,35 @@
                   </div>
                 </td>
               </tr>`;
-          }
-          detail += '</tbody></table>';
+            }
+            detail += '</tbody></table>';
 
-          html += `
+            let containerMetricsHtml = loadMethod === 'loose'
+              ? `<div class="metric-flat-grid">
+                <div class="metric-flat"><div class="val">${m.total_cases}</div><div class="lbl">cases</div></div>
+                <div class="metric-flat"><div class="val">${m.stacks}</div><div class="lbl">stacks</div></div>
+                <div class="metric-flat"><div class="val" style="color:${m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)'}">${m.volume_utilisation}%</div><div class="lbl">CBM util.</div></div>
+                <div class="metric-flat"><div class="val">${m.total_cbm.toFixed(1)} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${m.container_cbm.toFixed(1)}</span></div><div class="lbl">volume (m³)</div></div>
+                <div class="metric-flat"><div class="val">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${wl.toLocaleString()}</span></div><div class="lbl">gross weight (kg)</div></div>
+              </div>`
+              : `<div class="metric-flat-grid">
+                <div class="metric-flat"><div class="val">${m.total_cases}</div><div class="lbl">cases</div></div>
+                <div class="metric-flat"><div class="val">${m.pallets} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${PALLET_CAPACITY[ctn.type]}</span></div><div class="lbl">pallets</div></div>
+                <div class="metric-flat"><div class="val">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${wl.toLocaleString()}</span></div><div class="lbl">gross weight (kg)</div></div>
+              </div>`;
+
+            let vizSections = loadMethod === 'loose' ? `
+            <div class="container-section">
+              <div class="container-section-title"><i class="ti ti-layout-board"></i> Floor Plan</div>
+              <div class="viz-wrapper">${viz}</div>
+            </div>
+            <div class="container-section">
+              <div class="container-section-title"><i class="ti ti-cube"></i> 3D View</div>
+              <div class="viz-wrapper">${isoViz}</div>
+            </div>
+          ` : '';
+
+            html += `
     <div class="card container-card">
       <div class="container-header">
         <div class="container-title">
@@ -1582,23 +1743,8 @@
         </div>
       </div>
 
-      <div class="metric-flat-grid">
-        <div class="metric-flat"><div class="val">${m.total_cases}</div><div class="lbl">cases</div></div>
-        <div class="metric-flat"><div class="val">${m.stacks}</div><div class="lbl">stacks</div></div>
-        <div class="metric-flat"><div class="val" style="color:${m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)'}">${m.volume_utilisation}%</div><div class="lbl">CBM util.</div></div>
-        <div class="metric-flat"><div class="val">${m.total_cbm.toFixed(1)} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${m.container_cbm.toFixed(1)}</span></div><div class="lbl">volume (m³)</div></div>
-        <div class="metric-flat"><div class="val">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${wl.toLocaleString()}</span></div><div class="lbl">gross weight (kg)</div></div>
-      </div>
-
-      <div class="container-section">
-        <div class="container-section-title"><i class="ti ti-layout-board"></i> Floor Plan</div>
-        <div class="viz-wrapper">${viz}</div>
-      </div>
-
-      <div class="container-section">
-        <div class="container-section-title"><i class="ti ti-cube"></i> 3D View</div>
-        <div class="viz-wrapper">${isoViz}</div>
-      </div>
+      ${containerMetricsHtml}
+      ${vizSections}
 
       <div class="container-section">
         <div class="container-section-title"><i class="ti ti-list-details"></i> Placement Detail</div>
@@ -1607,6 +1753,7 @@
         </div>
       </div>
     </div>`;
+          }
         }
 
         out.innerHTML = html;
