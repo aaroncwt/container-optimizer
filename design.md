@@ -77,9 +77,9 @@ WHILE there are unassigned cases:
         FAIL with an error — the product is physically incompatible.
 ```
 
-**Key decision:** The algorithm always tries the smallest container first. This minimises cost when the entire order is small enough to fit in one box. It only escalates to larger containers when necessary.
+**Key decision:** The algorithm always tries the smallest container first. This minimises cost when the entire order is small enough to fit in one box. It additionally prefers a lower count of larger containers over more smaller containers to minimize logistics costs.
 
-### 4.3 Packing a Single Container (`packOrder`)
+### 3.2 Packing a Single Container (`packOrder`)
 
 Given a fixed container and a list of items to pack, this function determines whether and how all the cases can be arranged physically.
 
@@ -133,7 +133,7 @@ If no free rectangle can accommodate a stack, packing fails — the order exceed
 | CBM utilisation (%) | Volume used ÷ container CBM limit × 100 |
 | Stack count | Number of stacks placed |
 
-### 4.4 Greedy Fill (`greedyFill`)
+### 3.4 Greedy Fill (`greedyFill`)
 
 Used when the total order does not fit in any single container. The goal is to fill a 40hc container with as many cases as possible, respecting both space and weight.
 
@@ -150,7 +150,7 @@ FOR each product (in code order):
 
 The binary search runs `packOrder` at each step to test feasibility. This is computationally intensive for large orders but ensures an accurate answer.
 
-### 4.5 Weight Limit Enforcement (`enforceWeightLimit`)
+### 3.5 Weight Limit Enforcement (`enforceWeightLimit`)
 
 Used when an entire order's cases fit spatially in a container but the combined weight exceeds the limit. The algorithm removes cases from the last product first:
 
@@ -167,9 +167,9 @@ WHILE total weight > limit:
 
 ---
 
-## 5. Palletized Load Algorithm
+## 4. Palletized Load Algorithm
 
-### 5.1 Pallet Generation
+### 4.1 Pallet Generation
 
 Before assigning pallets to containers, the algorithm converts the order into a list of individual pallets:
 
@@ -184,7 +184,7 @@ Each pallet carries its weight as: `(cases on pallet × gross weight per case) +
 
 > **Note on partial pallets:** A partial pallet is treated exactly like a full pallet for allocation purposes — it still occupies one pallet slot in the container.
 
-### 5.2 Container Assignment Loop (`selectPalletContainers`)
+### 4.2 Container Assignment Loop (`selectPalletContainers`)
 
 Pallets are sorted by product code before assignment, keeping the same product together where possible.
 
