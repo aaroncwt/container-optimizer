@@ -185,12 +185,21 @@ FUNCTION packOrder(order, container):
         bestWaste = Infinity
         bestOrientation = NULL
 
-        // Find the best free rectangle to place this stack
+        // Find the best free rectangle to place this stack, filling furthest end first
         FOR each rect IN freeRects:
             FOR each orientation IN [(length, width), (width, length)]:
                 IF stack dimensions (in orientation) <= rect dimensions:
                     waste = (rect.length * rect.width) - (stack.length * stack.width)
-                    IF waste < bestWaste:
+                    
+                    // Prioritize minimum X (furthest back), then minimum Y, then minimum waste
+                    isBetter = bestRect is NULL OR
+                               rect.x < bestX OR
+                               (rect.x == bestX AND rect.y < bestY) OR
+                               (rect.x == bestX AND rect.y == bestY AND waste < bestWaste)
+
+                    IF isBetter:
+                        bestX = rect.x
+                        bestY = rect.y
                         bestWaste = waste
                         bestRect = rect
                         bestOrientation = orientation
