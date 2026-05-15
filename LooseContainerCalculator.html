@@ -28,8 +28,8 @@
       --color-border-secondary: #e2e8f0;
       --color-border-tertiary: #f1f5f9;
 
-      --color-brand: #3b82f6;
-      --color-brand-hover: #2563eb;
+      --color-brand: #005EEF;
+      --color-brand-hover: #005EEF;
 
       --border-radius-sm: 6px;
       --border-radius-md: 10px;
@@ -216,7 +216,7 @@
       font-weight: 600;
       padding: 16px 32px;
       border-radius: var(--border-radius-lg);
-      background: linear-gradient(135deg, var(--color-brand) 0%, #2563eb 100%);
+      background: linear-gradient(135deg, var(--color-brand) 0%, #005EEF 100%);
       color: white;
       border: none;
       width: 100%;
@@ -366,7 +366,7 @@
 
     .upload-zone:hover,
     .upload-zone.drag {
-      background: #f1f5f9;
+      background: #ffffff;
       border-color: var(--color-brand);
     }
 
@@ -403,7 +403,6 @@
       font-size: 13px;
       color: var(--color-text-tertiary);
       line-height: 1.6;
-      max-width: 500px;
       margin: 0 auto;
     }
 
@@ -678,6 +677,94 @@
     .animate-spin {
       animation: spin 1s linear infinite;
     }
+
+    /* Expandable Table Styles */
+    .expandable-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0 8px;
+      margin-top: 1rem;
+    }
+
+    .expandable-table th {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--color-text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 8px 16px;
+      text-align: left;
+    }
+
+    .product-row {
+      cursor: pointer;
+      transition: transform 0.1s ease, box-shadow 0.2s ease;
+    }
+
+    .product-row:hover {
+      filter: brightness(0.98);
+      transform: scale(1.002);
+    }
+
+    .product-row td {
+      padding: 14px 16px;
+      font-size: 14px;
+      border-top: 1px solid rgba(0, 0, 0, 0.05);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    }
+
+    .product-row td:first-child {
+      border-left: 4px solid transparent;
+      border-top-left-radius: var(--border-radius-md);
+      border-bottom-left-radius: var(--border-radius-md);
+    }
+
+    .product-row td:last-child {
+      border-right: 1px solid rgba(0, 0, 0, 0.05);
+      border-top-right-radius: var(--border-radius-md);
+      border-bottom-right-radius: var(--border-radius-md);
+    }
+
+    .product-row.open .ti-chevron-right {
+      transform: rotate(90deg);
+    }
+
+    .stack-details-row {
+      display: none;
+    }
+
+    .stack-details-row.open {
+      display: table-row;
+    }
+
+    .stack-details-container {
+      padding: 0 16px 16px 40px;
+    }
+
+    .stack-table {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.5);
+      border-radius: var(--border-radius-md);
+      font-size: 13px;
+      border-collapse: collapse;
+    }
+
+    .stack-table th {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--color-border-tertiary);
+      color: var(--color-text-tertiary);
+      font-size: 11px;
+    }
+
+    .stack-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--color-border-tertiary);
+      color: var(--color-text-secondary);
+    }
+
+    .stack-table tr:last-child td {
+      border-bottom: none;
+    }
   </style>
 </head>
 
@@ -696,8 +783,7 @@
         <div class="upload-zone" id="drop-zone" onclick="$('file-in').click()" ondragover="dzEv(event,'drag',true)"
           ondragleave="dzEv(event,'drag',false)" ondrop="onDrop(event)">
           <i class="ti ti-file-spreadsheet upload-icon" aria-hidden="true"></i>
-          <div class="upload-title">Drop an Excel file here, or click to browse</div>
-          <div class="upload-subtitle">.xlsx or .xls files supported</div>
+          <div class="upload-title">Drop an xlsx/xls file here, or click to browse</div>
           <div class="upload-hint">
             Required columns: <strong>Product Code</strong>, <strong>Product Name</strong>, <strong>Length</strong>,
             <strong>Width</strong>, <strong>Height</strong> (mm), <strong>Gross Weight</strong> (kg),
@@ -734,7 +820,7 @@
       <div
         style="display:flex;gap:12px;align-items:center;background:#f8fafc;padding:16px;border-radius:var(--border-radius-lg);border:1px dashed #cbd5e1;">
         <div class="ac-wrap" style="width:200px;flex-shrink:0;" id="ac-wrap">
-          <input type="text" id="ac-input" placeholder="Product code…" autocomplete="off" oninput="acFilter()"
+          <input type="text" id="ac-input" placeholder="Product Code" autocomplete="off" oninput="acFilter()"
             onfocus="acFilter()" onkeydown="acKey(event)" style="font-family:var(--font-mono);">
           <div class="ac-drop" id="ac-drop"></div>
         </div>
@@ -746,12 +832,18 @@
               class="ti ti-plus" aria-hidden="true"></i> Add</button>
         </div>
       </div>
+      <div style="margin-top: 12px;">
+        <textarea id="paste-area" placeholder="Or paste SKUs and quantities here from Excel"
+          style="width:100%;height:60px;padding:20px 14px;font-family:var(--font-sans);font-size:14px;border:1px dashed #94a3b8;border-radius:var(--border-radius-md);resize:none;background:#f8fafc;transition:border-color 0.2s;"
+          onfocus="this.style.borderColor='var(--color-brand)'" onblur="this.style.borderColor='#94a3b8'"
+          onpaste="handlePasteOrder(event)"></textarea>
+      </div>
       <div id="order-err"></div>
     </div>
   </div>
 
   <button class="btn-run" id="run-btn" onclick="runPacking()" disabled>
-    <i class="ti ti-package-export" aria-hidden="true" style="font-size: 24px;"></i> Containerize
+    Containerize
   </button>
 
   <div id="results" style="margin-top:3rem;"></div>
@@ -763,7 +855,7 @@
     const WEIGHT_LIMITS = { '20ft': 21770, '40ft': 26730, '40hc': 26540 };
     const CBM_LIMITS = { '20ft': 28, '40ft': 58, '40hc': 68 };
     const CONTAINER_LABELS = { '20ft': '20ft Standard', '40ft': '40ft Standard', '40hc': '40ft High Cube' };
-    const COLORS = ['#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ea580c', '#0d9488', '#db2777', '#ca8a04', '#4f46e5', '#65a30d'];
+    const COLORS = ['#dc2626', '#005EEF', '#16a34a', '#9333ea', '#ea580c', '#0d9488', '#db2777', '#ca8a04', '#4f46e5', '#65a30d'];
     const COLORS_L = ['#fee2e2', '#dbeafe', '#dcfce7', '#f3e8ff', '#ffedd5', '#ccfbf1', '#fce7f3', '#fef9c3', '#e0e7ff', '#ecfccb'];
 
     let catalogue = {}, catCodes = [], orderLines = [], lineCount = 0, acIdx = -1;
@@ -878,12 +970,75 @@
     function addOrderLine() {
       const code = $('ac-input').value.trim(), cases = parseInt($('new-cases').value) || 1, err = $('order-err');
       if (!code) return err.innerHTML = '<div class="warn"><i class="ti ti-alert-triangle"></i> Enter a product code.</div>';
+      if (!/^\d+$/.test(code)) return err.innerHTML = '<div class="warn"><i class="ti ti-alert-triangle"></i> SKU codes must be digits only.</div>';
       if (!catalogue[code]) return err.innerHTML = `<div class="warn"><i class="ti ti-alert-triangle"></i> Code "${code}" not found.</div>`;
       err.innerHTML = '';
       orderLines.push({ id: ++lineCount, code, cases });
       renderOrderList();
       $('ac-input').value = $('resolved-name').textContent = '';
       $('new-cases').value = '10';
+    }
+
+    function handlePasteOrder(e) {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData('text');
+      if (!text) return;
+
+      const lines = text.split(/\r?\n/);
+      let added = 0;
+      let missing = [];
+      let invalid = [];
+
+      for (let line of lines) {
+        line = line.trim();
+        if (!line) continue;
+
+        const parts = line.split(/\t|,/);
+        if (parts.length < 1) continue;
+
+        const code = parts[0].trim();
+        if (!code) continue;
+
+        if (!/^\d+$/.test(code)) {
+          invalid.push(code);
+          continue;
+        }
+
+        if (!catalogue[code]) {
+          missing.push(code);
+          continue;
+        }
+
+        let cases = 1;
+        if (parts.length >= 2) {
+          for (let i = parts.length - 1; i >= 1; i--) {
+            const parsed = parseInt(parts[i].trim(), 10);
+            if (!isNaN(parsed) && parsed > 0) {
+              cases = parsed;
+              break;
+            }
+          }
+        }
+
+        orderLines.push({ id: ++lineCount, code, cases });
+        added++;
+      }
+
+      const errEl = $('order-err');
+      let msg = '';
+      if (added > 0) {
+        renderOrderList();
+        msg += `<div class="ok" style="margin-top:12px;background:#f0fdf4;border-color:#bbf7d0;color:#166534;"><i class="ti ti-check"></i> Added ${added} products from paste.</div>`;
+      }
+      if (invalid.length > 0) {
+        const sample = invalid.slice(0, 3).join(', ') + (invalid.length > 3 ? '...' : '');
+        msg += `<div class="warn"><i class="ti ti-alert-triangle"></i> Skipped ${invalid.length} invalid SKUs (digits only) (e.g. ${sample}).</div>`;
+      }
+      if (missing.length > 0) {
+        const sample = missing.slice(0, 3).join(', ') + (missing.length > 3 ? '...' : '');
+        msg += `<div class="warn"><i class="ti ti-alert-triangle"></i> Skipped ${missing.length} unrecognised SKUs (e.g. ${sample}).</div>`;
+      }
+      errEl.innerHTML = msg;
     }
 
     function removeOrderLine(id) { orderLines = orderLines.filter(l => l.id !== id); renderOrderList(); }
@@ -939,12 +1094,19 @@
       let freeRects = [{ x: 0, y: 0, length: cL, width: cW }];
 
       for (const stack of stackList) {
-        let bestRect = null, bestWaste = Infinity, bestSL, bestSW;
+        let bestRect = null, bestX = Infinity, bestY = Infinity, bestWaste = Infinity, bestSL, bestSW;
         for (const rect of freeRects) {
           for (const [sl, sw] of [[stack.case_length, stack.case_width], [stack.case_width, stack.case_length]]) {
             if (sl <= rect.length + .001 && sw <= rect.width + .001) {
               const waste = rect.length * rect.width - sl * sw;
-              if (waste < bestWaste) { bestWaste = waste; bestRect = rect; bestSL = sl; bestSW = sw; }
+              const isBetter = bestRect === null ||
+                rect.x < bestX - 0.001 ||
+                (Math.abs(rect.x - bestX) <= 0.001 && rect.y < bestY - 0.001) ||
+                (Math.abs(rect.x - bestX) <= 0.001 && Math.abs(rect.y - bestY) <= 0.001 && waste < bestWaste);
+              if (isBetter) {
+                bestX = rect.x; bestY = rect.y; bestWaste = waste;
+                bestRect = rect; bestSL = sl; bestSW = sw;
+              }
             }
           }
         }
@@ -1041,6 +1203,22 @@
         }
       }
 
+      // Add doors at the front (x = cL)
+      const doorW = cW / 2;
+      const dx = doorW * 0.7; // 45 degree-ish open
+      const dy = doorW * 0.7;
+
+      // Right door (hinged at y=0)
+      const dr1 = proj(cL, 0, 0), dr2 = proj(cL + dx, -dy, 0), dr3 = proj(cL + dx, -dy, cH), dr4 = proj(cL, 0, cH);
+      svgs += `<polygon points="${toPts([dr1, dr2, dr3, dr4])}" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" stroke-linejoin="round"/>`;
+      // Left door (hinged at y=cW)
+      const dl1 = proj(cL, cW, 0), dl2 = proj(cL + dx, cW + dy, 0), dl3 = proj(cL + dx, cW + dy, cH), dl4 = proj(cL, cW, cH);
+      svgs += `<polygon points="${toPts([dl1, dl2, dl3, dl4])}" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" stroke-linejoin="round"/>`;
+
+      // Add a simple frame at the front
+      const f1 = proj(cL, 0, 0), f2 = proj(cL, cW, 0), f3 = proj(cL, cW, cH), f4 = proj(cL, 0, cH);
+      svgs += `<polygon points="${toPts([f1, f2, f3, f4])}" fill="none" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4,2"/>`;
+
       return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:800px;display:block;">
         ${svgs}
       </svg>`;
@@ -1055,15 +1233,19 @@
       for (const p of floorPlan) {
         const x = ox + p.x * scale, y = oy + p.y * scale, w = p.footprint_l * scale, h = p.footprint_w * scale;
         const col = colorMap[p.code];
-        const pct = Math.round(p.physical_height / cH * 100);
         rects += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${col.bg}" stroke="${col.fg}" stroke-width="1.5" rx="3"/>`;
-        if (w > 20 && h > 20) {
-          rects += `<text x="${(x + w / 2).toFixed(1)}" y="${(y + h / 2 + 2).toFixed(1)}" text-anchor="middle" font-size="14" fill="${col.fg}" font-family="var(--font-mono)" font-weight="700">${col.num}</text>`;
-        }
+
       }
+      const doorLen = Math.min(dH / 2, 20);
+      rects += `
+        <g stroke="#94a3b8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M ${ox + dW} ${oy} L ${ox + dW + doorLen} ${oy - doorLen * 0.5}" />
+          <path d="M ${ox + dW} ${oy + dH} L ${ox + dW + doorLen} ${oy + dH + doorLen * 0.5}" />
+        </g>
+      `;
       return `<svg viewBox="0 0 ${W} ${H + 30}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:800px;display:block;">
     <rect x="${ox}" y="${oy}" width="${dW.toFixed(1)}" height="${dH.toFixed(1)}" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6,4" rx="4"/>
-    <text x="${(ox + dW / 2).toFixed(1)}" y="${(oy + dH + 18).toFixed(1)}" text-anchor="middle" font-size="12" fill="#64748b" font-family="var(--font-sans)">Length ${cL}cm →</text>
+    <text x="${(ox + dW / 2).toFixed(1)}" y="${(oy + dH + 18).toFixed(1)}" text-anchor="middle" font-size="12" fill="#64748b" font-family="var(--font-sans)">Length ${cL}cm (Doors at this end) →</text>
     <text x="${(ox - 14).toFixed(1)}" y="${(oy + dH / 2).toFixed(1)}" text-anchor="middle" font-size="12" fill="#64748b" font-family="var(--font-sans)" transform="rotate(-90,${(ox - 14).toFixed(1)},${(oy + dH / 2).toFixed(1)})">Width ${cW}cm</text>
     ${rects}
   </svg>`;
@@ -1332,26 +1514,64 @@
           const viz = renderViz(ctn.result.floor_plan, cDims, colorMap);
           const isoViz = renderIsoViz(ctn.result.floor_plan, cDims, colorMap);
 
-          let detail = '';
+          let detail = `
+            <table class="expandable-table">
+              <thead>
+                <tr>
+                  <th style="width: 40px;"></th>
+                  <th style="width: 120px;">SKU</th>
+                  <th>Product Name</th>
+                  <th style="text-align: center;">Total Cases</th>
+                  <th style="text-align: center;">Total Weight (kg)</th>
+                  <th style="text-align: center;">Stacks</th>
+                </tr>
+              </thead>
+              <tbody>`;
+
           for (const [code, positions] of Object.entries(ctn.result.placement_plan)) {
             const col = colorMap[code];
             const tot = positions.reduce((s, p) => s + p.cases_in_stack, 0);
-            const wt = positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0).toFixed(2);
-            detail += `<details class="detail-box">
-        <summary class="row" style="gap:12px;cursor:pointer;user-select:none;">
-          <span class="code-pill">${code}</span>
-          <span style="font-size:15px;font-weight:600;color:var(--color-text-primary);">${positions[0].name}</span>
-          <span class="badge" style="background:${col.bg};color:${col.fg};margin-left:auto;border:1px solid ${col.fg}40;">${tot} cases · ${wt} kg · ${positions.length} stack${positions.length !== 1 ? 's' : ''}</span>
-          <i class="ti ti-chevron-down" style="color:var(--color-text-tertiary);transition:transform 0.2s;"></i>
-        </summary>
-        <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--color-border-secondary);">`;
-            for (const [i, p] of positions.entries()) {
-              detail += `<div style="font-size:13px;color:var(--color-text-secondary);margin-left:28px;line-height:1.8;position:relative;">
-          <span style="position:absolute;left:-16px;color:#cbd5e1;">↳</span>
-          <strong style="color:var(--color-text-primary);">Stack ${i + 1}:</strong> position (${p.x.toFixed(0)}, ${p.y.toFixed(0)}) — ${p.footprint_l.toFixed(1)}×${p.footprint_w.toFixed(1)}cm footprint · ${p.cases_in_stack} cases · ${p.physical_height.toFixed(1)}cm tall · ${(p.gross_weight_kg * p.cases_in_stack).toFixed(2)} kg</div>`;
-            }
-            detail += '</div></details>';
+            const wt = positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0);
+
+            detail += `
+              <tr class="product-row" onclick="toggleProductStacks(this)" style="background-color: ${col.bg};">
+                <td style="text-align: center;"><i class="ti ti-chevron-right" style="transition: transform 0.2s;"></i></td>
+                <td style="font-weight: 600;">${code}</td>
+                <td>${positions[0].name}</td>
+                <td style="text-align: center;">${tot}</td>
+                <td style="text-align: center;">${wt.toFixed(1)}</td>
+                <td style="text-align: center;">${positions.length}</td>
+              </tr>
+              <tr class="stack-details-row">
+                <td colspan="7">
+                  <div class="stack-details-container">
+                    <table class="stack-table">
+                      <thead>
+                        <tr>
+                          <th>Stack #</th>
+                          <th>Footprint (L×W) (cm)</th>
+                          <th style="text-align: center;">Cases</th>
+                          <th style="text-align: center;">Height (cm)</th>
+                          <th style="text-align: center;">Weight (kg)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${positions.map((p, i) => `
+                          <tr>
+                            <td style="font-weight: 600; color: var(--color-text-primary);">#${i + 1}</td>
+                            <td>${p.footprint_l.toFixed(1)} × ${p.footprint_w.toFixed(1)}</td>
+                            <td style="text-align: center;">${p.cases_in_stack}</td>
+                            <td style="text-align: center;">${p.physical_height.toFixed(1)}</td>
+                            <td style="text-align: center;">${(p.gross_weight_kg * p.cases_in_stack).toFixed(1)}</td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+                </td>
+              </tr>`;
           }
+          detail += '</tbody></table>';
 
           html += `
     <div class="card container-card">
@@ -1396,6 +1616,14 @@
         // Scroll down slightly to display the results
         window.scrollBy({ top: 400, behavior: 'smooth' });
       }, 1000);
+    }
+
+    function toggleProductStacks(el) {
+      el.classList.toggle('open');
+      const next = el.nextElementSibling;
+      if (next && next.classList.contains('stack-details-row')) {
+        next.classList.toggle('open');
+      }
     }
 
     renderOrderList();
