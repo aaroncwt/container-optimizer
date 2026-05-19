@@ -1,243 +1,254 @@
-# Container Optimization Algorithm Logic
+# Container Calculator — Functional Design
 
-This document describes the container packing algorithm implemented in the application. The algorithm is responsible for selecting the appropriate containers and packing products into them while respecting physical constraints (dimensions and weight limits).
+---
 
-## Overview
-The optimization process consists of two main levels:
-1. **Container Selection & Allocation (`selectContainers`)**: Determines the mix of containers (20ft, 40ft, 40hc) and partitions the order among them.
-2. **Container Packing (`packOrder`)**: Determines if a specific set of items can physically fit into a single container's dimensions using a 2D bin-packing approach with height constraints.
+## Inputs
 
-## 1. Container Selection and Allocation (`selectContainers`)
+### Product Master (Excel file)
 
-```text
-FUNCTION selectContainers(orderItems):
-    remainingItems = copy of orderItems
-    sort remainingItems by product code alphabetically
-    containers = empty list
-    containerTypes = ['20ft', '40ft', '40hc']
+The product master is the catalogue of all shippable products. The tool reads the first worksheet and requires the following columns (column names are matched flexibly, case-insensitively):
 
-    WHILE remainingItems is not empty:
-        selectedType = NULL
-        packResult = NULL
+| Field | Required | Purpose |
+|---|---|---|
+| Product Code | Yes | Unique identifier (must be digits only) |
+| Product Name | Yes | Human-readable label |
+| Length (mm) | Yes | Case outer dimension |
+| Width (mm) | Yes | Case outer dimension |
+| Height (mm) | Yes | Case outer dimension |
+| Gross Weight (kg) | Yes | Total weight of one case |
+| Cases Per Pallet | Yes | Used by palletized mode |
+| Max Stack | No | Maximum number of cases that can be stacked vertically |
 
-        // Try to fit all remaining items into a single container, starting from the smallest
-        FOR each type IN containerTypes:
-            result = packOrder(remainingItems, type.dimensions)
-            IF result is successful:
-                selectedType = type
-                packResult = result
-                BREAK
+**Validation:** Any row missing a product code, name, or any numeric dimension is silently skipped. If no valid rows remain after skipping, loading fails.
 
-        IF selectedType is found:
-            // All remaining items physically fit into selectedType
-            IF packResult.metrics.total_weight > type.weightLimit:
-                // Weight limit exceeded, remove items until it's under the limit
-                packed, overflow = enforceWeightLimit(remainingItems, selectedType)
-                result = packOrder(packed, selectedType.dimensions)
-                add {type: selectedType, result: result} to containers
-                remainingItems = overflow
-            ELSE:
-                // Fits both physically and by weight
-                add {type: selectedType, result: packResult} to containers
-                remainingItems = empty
+
+
+### Loading Method
+
+The user selects one of two modes before running the calculation:
+
+| Mode | Description |
+|---|---|
+| **Loose Load** | Cases are stacked directly on the container floor. The tool plans exact floor positions and stack heights. |
+| **Palletized** | Cases are grouped onto pallets. The tool allocates pallets to containers by count and weight, without planning floor positions. |
+
+#### Loose Load
+CBM utilization is colour-coded in the results:
+- **Below 80%** — displayed in red (poor utilization; consider consolidation)
+- **80% and above** — displayed in blue (acceptable)
+
+#### Palletized
+Pallet utilization is colour-coded in the results:
+- **Below limit** - displayed in red (poor utilization; consider consolition)
+- **At limit** - displayed in blue (acceptable)
+
+---
+
+## Container Types
+
+The tool works with three standard dry container sizes:
+
+| Type | Internal Length | Internal Width | Internal Height | CBM Limit | Weight Limit (kg) | Pallet Capacity (floor-loaded) |
+|---|---|---|---|---|---|---|
+| 20ft Standard | 5.90 m | 2.35 m | 2.39 m | 28 m³ | 21,770 | 10 |
+| 40ft Standard | 12.03 m | 2.35 m | 2.39 m | 58 m³ | 26,730 | 20 |
+| 40ft High Cube | 12.03 m | 2.35 m | 2.69 m | 68 m³ | 26,540 | 20 |
+
+> **Note on CBM limits:** For the loose load mode, the CBM utilization metric is calculated against these declared limits (not the raw geometric volume of the container). This reflects typical industry practice where unusable corner space is factored in.
+
+
+
+---
+
+## Loose Load Algorithm
+
+The loose load algorithm assigns the entire order to one or more containers, subject to physical space and weight limits. It proceeds container-by-container until all cases are assigned.
+
+### Container Selection Loop (`selectContainers`)
+
+```
+WHILE there are unassigned cases:
+    TRY to fit all remaining cases into a single container, 
+    testing sizes from smallest (20ft) to largest (40hc).
+
+    IF a container size fits all remaining cases (space-wise):
+        CHECK weight against that container's weight limit.
+        IF weight is within limit:
+            Assign all remaining cases to this container. Done.
         ELSE:
-            // Items do not fit in any single container, greedily fill the largest ('40hc')
-            packed, overflow = greedyFill(remainingItems, '40hc')
-            
-            IF packed is empty:
-                // Edge case: A single item cannot fit
-                RETURN error "Product cannot physically fit"
-            
-            result = packOrder(packed, '40hc'.dimensions)
-            add {type: '40hc', result: result} to containers
-            remainingItems = overflow
+            Enforce the weight limit (see §4.5).
+            Assign the within-limit portion to this container.
+            The overflow becomes the new "remaining" for the next iteration.
 
-    RETURN success, containers
+    IF no single container size can fit all remaining cases:
+        Greedily fill a 40hc container with as many cases as possible (see §4.4).
+        The leftover cases become the new "remaining" for the next iteration.
+
+    IF even a single case of the first remaining product cannot physically fit
+    in any container:
+        FAIL with an error — the product is physically incompatible.
 ```
 
-## 2. Greedy Fill (`greedyFill`)
-Fills a specific container type as much as possible with the remaining items sequentially.
+**Key decision:** The algorithm always tries the smallest container first. This minimises cost when the entire order is small enough to fit in one box. It additionally prefers a lower count of larger containers over more smaller containers to minimize logistics costs.
 
-```text
-FUNCTION greedyFill(items, type):
-    packed = empty list
-    overflow = empty list
+### Packing a Single Container (`packOrder`)
 
-    FOR each item IN items:
-        trialPack = packed + item
-        result = packOrder(trialPack, type.dimensions)
-        
-        IF result is successful AND result.metrics.total_weight <= type.weightLimit:
-            add item to packed
-        ELSE:
-            // Binary search to find the maximum number of cases of this item that will fit
-            low = 0
-            high = item.case_count
-            bestCases = 0
-            
-            WHILE low <= high:
-                mid = floor((low + high) / 2)
-                IF mid == 0:
-                    low = 1
-                    CONTINUE
-                
-                trialPack = packed + (item with mid cases)
-                result = packOrder(trialPack, type.dimensions)
-                
-                IF result is successful AND result.metrics.total_weight <= type.weightLimit:
-                    bestCases = mid
-                    low = mid + 1
-                ELSE:
-                    high = mid - 1
-                    
-            IF bestCases > 0:
-                add (item with bestCases) to packed
-                add (item with remaining cases) to overflow
-            ELSE:
-                add item to overflow
+Given a fixed container and a list of items to pack, this function determines whether and how all the cases can be arranged physically.
 
-    RETURN packed, overflow
+#### Step 1 — Physical feasibility check
+
+Before attempting any placement, the algorithm checks that every product's case height is ≤ the container's internal height. Any product that fails this check causes the packing to fail immediately with a descriptive error.
+
+#### Step 2 — Build the stack list
+
+Products are sorted by **quantity descending** (highest case count first). This heuristic places large-volume products first, giving them priority access to the best floor positions.
+
+For each product, the algorithm calculates the **maximum stack height**:
+
+```
+maxByHeight  = floor(containerHeight / caseHeight)
+effectiveMax = min(product.maxStackHeight, maxByHeight)   [if maxStackHeight is defined]
+             = maxByHeight                                 [if maxStackHeight is not defined]
 ```
 
-## 3. Enforce Weight Limit (`enforceWeightLimit`)
-Removes items from the end of the list until the total weight is under the container's weight limit.
+The product's cases are then divided into stacks of `effectiveMax` each (the last stack may be smaller if cases don't divide evenly). Each stack is treated as a single rectangular block for floor planning purposes.
 
-```text
-FUNCTION enforceWeightLimit(items, type):
-    packed = copy of items
-    overflow = empty list
+#### Step 3 — Floor plan placement (Guillotine algorithm)
 
-    WHILE packed is not empty:
-        result = packOrder(packed, type.dimensions)
-        IF result is successful AND result.metrics.total_weight <= type.weightLimit:
-            RETURN packed, overflow
-            
-        lastItem = last element in packed
-        IF lastItem.case_count > 1:
-            // Binary search to find maximum cases that keep weight under limit
-            low = 1
-            high = lastItem.case_count
-            bestCases = 0
-            
-            WHILE low <= high:
-                mid = floor((low + high) / 2)
-                trialPack = packed (without lastItem) + (lastItem with mid cases)
-                result = packOrder(trialPack, type.dimensions)
-                
-                IF result is successful AND result.metrics.total_weight <= type.weightLimit:
-                    bestCases = mid
-                    low = mid + 1
-                ELSE:
-                    high = mid - 1
-            
-            IF bestCases > 0:
-                add (lastItem with remaining cases) to start of overflow
-                update lastItem in packed to have bestCases
-                RETURN packed, overflow
-                
-        // If we reach here, either it was 1 case or even 1 case was too heavy
-        remove lastItem from packed
-        add lastItem to start of overflow
+The container floor is modelled as a set of **free rectangles**. Initially there is one free rectangle covering the entire floor.
 
-    RETURN packed, overflow
+For each stack, the algorithm finds the **best-fit placement**:
+
+1. For each free rectangle, test both orientations of the stack's footprint (length × width, and width × length).
+2. Discard orientations that don't fit within the rectangle's bounds.
+3. Among valid placements, select the one that:
+   - Is **furthest from the door** (highest x-coordinate first), then
+   - Furthest to one side (highest y-coordinate), then
+   - Has the **least wasted area** (tightest fit).
+
+> **Business rationale for loading from the back:** Filling the deepest positions first reflects real-world container loading practice — goods loaded first end up furthest from the doors.
+
+4. Place the stack at the chosen position.
+5. **Split the used rectangle** into two remaining free rectangles:
+   - A rectangle to the **right** of the placed stack (same depth, remaining width).
+   - A rectangle **above** the placed stack (full depth of the original rect, remaining height).
+
+If no free rectangle can accommodate a stack, packing fails — the order exceeds this container's floor area.
+
+#### Output metrics
+
+| Metric | Calculation |
+|---|---|
+| Total cases | Sum of all case counts in the order |
+| Total weight (kg) | Sum of (gross weight per case × cases in stack) for all stacks |
+| Volume used (m³) | Sum of (footprint area × stack height) for all stacks |
+| CBM utilization (%) | Volume used ÷ container CBM limit × 100 |
+| Stack count | Number of stacks placed |
+
+### Greedy Fill (`greedyFill`)
+
+Used when the total order does not fit in any single container. The goal is to fill a 40hc container with as many cases as possible, respecting both space and weight.
+
+```
+FOR each product (in code order):
+    TRY adding the full quantity of this product to the packed set.
+    IF it fits (space and weight):
+        Add it.
+    ELSE:
+        BINARY SEARCH for the maximum number of cases of this product that fit.
+        Add that many cases to this container.
+        Put the remainder in overflow.
 ```
 
-## 4. Container Packing (`packOrder`)
-Determines if a list of items can fit into a specific container size using a 2D Best-Area-Fit heuristic with 1D height stacking.
+The binary search runs `packOrder` at each step to test feasibility. This is computationally intensive for large orders but ensures an accurate answer.
 
-```text
-FUNCTION packOrder(order, container):
-    // 1. Initial height check
-    IF any item.case_height > container.height:
-        RETURN failure "Item too tall"
+### Weight Limit Enforcement (`enforceWeightLimit`)
 
-    // 2. Sort items by quantities descending
-    sortedOrder = sort order by case_count descending
+Used when an entire order's cases fit spatially in a container but the combined weight exceeds the limit. The algorithm removes cases from the last product first:
 
-    // 3. Form stacks
-    stackList = empty list
-    FOR each item IN sortedOrder:
-        maxByHeight = floor(container.height / item.case_height)
-        effectiveMax = maxByHeight
-        IF item.max_stack_height is set:
-            effectiveMax = minimum(item.max_stack_height, maxByHeight)
-        
-        remainingCases = item.case_count
-        WHILE remainingCases > 0:
-            casesInThisStack = minimum(remainingCases, effectiveMax)
-            create stack = {
-                code: item.code,
-                length: item.case_length,
-                width: item.case_width, 
-                cases_in_stack: casesInThisStack,
-                physical_height: casesInThisStack * item.case_height,
-                weight: casesInThisStack * item.gross_weight
-            }
-            add stack to stackList
-            remainingCases -= casesInThisStack
-
-    // 4. Floor placement (Guillotine Split Heuristic)
-    floorPlan = empty list
-    freeRects = [{x: 0, y: 0, length: container.length, width: container.width}]
-
-    FOR each stack IN stackList:
-        bestRect = NULL
-        bestWaste = Infinity
-        bestOrientation = NULL
-
-        // Find the best free rectangle to place this stack, filling furthest end first
-        FOR each rect IN freeRects:
-            FOR each orientation IN [(length, width), (width, length)]:
-                IF stack dimensions (in orientation) <= rect dimensions:
-                    waste = (rect.length * rect.width) - (stack.length * stack.width)
-                    
-                    // Prioritize minimum X (furthest back), then minimum Y, then minimum waste
-                    isBetter = bestRect is NULL OR
-                               rect.x < bestX OR
-                               (rect.x == bestX AND rect.y < bestY) OR
-                               (rect.x == bestX AND rect.y == bestY AND waste < bestWaste)
-
-                    IF isBetter:
-                        bestX = rect.x
-                        bestY = rect.y
-                        bestWaste = waste
-                        bestRect = rect
-                        bestOrientation = orientation
-
-        IF bestRect is NULL:
-            RETURN failure "Insufficient floor space"
-
-        // Place stack and split remaining space
-        place stack at (bestRect.x, bestRect.y)
-        add to floorPlan
-        
-        // Remove the chosen free rect
-        remove bestRect from freeRects
-        
-        // Split the remaining space into two new free rectangles (Right and Top)
-        rightRect = {
-            x: bestRect.x + stack.placedLength, 
-            y: bestRect.y, 
-            length: bestRect.length - stack.placedLength, 
-            width: stack.placedWidth
-        }
-        topRect = {
-            x: bestRect.x, 
-            y: bestRect.y + stack.placedWidth, 
-            length: bestRect.length, 
-            width: bestRect.width - stack.placedWidth
-        }
-        
-        IF rightRect.area > 0: add rightRect to freeRects
-        IF topRect.area > 0: add topRect to freeRects
-
-    metrics = {
-        volume_utilisation: (totalVolume / container.maxCBM) * 100,
-        total_cbm: totalVolume,
-        container_cbm: container.maxCBM,
-        total_cases: sum of cases,
-        total_weight: sum of weight
-    }
-
-    RETURN success, floorPlan, metrics
 ```
+WHILE total weight > limit:
+    TRY binary searching for the maximum cases of the last product that fit within the weight limit.
+    IF a partial quantity fits:
+        Keep that many in this container; move the rest to overflow.
+        STOP.
+    ELSE:
+        Remove the entire last product from this container; move it to overflow.
+        Repeat.
+```
+
+---
+
+## Palletized Load Algorithm
+
+### Pallet Generation
+
+Before assigning pallets to containers, the algorithm converts the order into a list of individual pallets:
+
+```
+FOR each product in the order:
+    DIVIDE the case quantity by cases_per_pallet.
+    Each full group of cases_per_pallet becomes one full pallet.
+    Any remainder becomes a partial pallet.
+```
+
+Each pallet carries its weight as: `(cases on pallet × gross weight per case) + 20 kg` (the empty pallet tare weight).
+
+> **Note on partial pallets:** A partial pallet is treated exactly like a full pallet for allocation purposes — it still occupies one pallet slot in the container.
+
+### Container Assignment Loop (`selectPalletContainers`)
+
+Pallets are sorted by product code before assignment, keeping the same product together where possible.
+
+```
+WHILE there are unassigned pallets:
+    TRY fitting all remaining pallets into the smallest container possible,
+    testing 20ft → 40ft → 40hc in order.
+    A container "fits" if:
+        remaining pallet count ≤ container's pallet capacity  AND
+        total pallet weight ≤ container's weight limit.
+
+    IF a container fits all remaining pallets:
+        Assign all to that container. Done.
+
+    IF no container fits all remaining pallets:
+        Use a 40hc container.
+        Load pallets one by one until either the capacity (20 pallets) or
+        the weight limit is reached.
+        Assign loaded pallets to this container.
+        The rest become "remaining" for the next iteration.
+
+    IF even a single pallet exceeds the weight limit of a 40hc:
+        FAIL with an error.
+```
+
+**Key difference from loose load:** Palletized mode does not perform floor-level space optimization. It treats containers as having a fixed pallet slot count (a GMA pallet standard) and checks only count and weight. There is no 2D or 3D visualization for palletized loads.
+
+---
+
+## Validation and Error Handling
+
+| Condition | Result |
+|---|---|
+| Product master missing required columns | Upload fails with column list |
+| No valid rows in product master | Upload fails |
+| SKU contains non-digit characters | Order line rejected with warning |
+| SKU not found in catalogue | Order line rejected with warning |
+| Order is empty when Containerize is clicked | Error message |
+| Order contains SKUs not in catalogue | Error message; calculation blocked |
+| Palletized mode with missing cases-per-pallet data | Error message; calculation blocked |
+| Case height exceeds container height | Packing fails with product name |
+| Product cannot fit in any container physically | Allocation fails with product name |
+| Single pallet exceeds weight limit | Palletized allocation fails with product name |
+
+---
+
+## Key Business Rules Summary
+
+1. **Container size preference:** Always use the smallest container that fits the remaining load. Escalate to larger containers only when necessary.
+2. **Loading direction:** In loose mode, stacks are placed from the back of the container toward the doors, matching real-world loading practice.
+3. **Product grouping:** Products are kept together within a container where possible (same-product stacks are generated consecutively). This simplifies physical unloading.
+4. **Stacking limits:** If a product master specifies a maximum stack height, it is honoured and takes precedence over the height-derived limit. This reflects fragility or stacking strength constraints.
+5. **Weight always wins:** A container that passes the space check can still be split if it fails the weight check. Weight limits are hard constraints.
+6. **Pallets have tare weight:** The 20 kg empty pallet weight is included in all palletized weight calculations, ensuring the weight limit reflects real-world shipping weights.
+7. **Partial pallets count as full slots:** A partial pallet occupies the same container slot count as a full pallet — consistent with how carriers charge for pallet positions.
