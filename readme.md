@@ -21,8 +21,6 @@ The product master is the catalogue of all shippable products. The tool reads th
 
 **Validation:** Any row missing a product code, name, or any numeric dimension is silently skipped. If no valid rows remain after skipping, loading fails.
 
-
-
 ### Loading Method
 
 The user selects one of two modes before running the calculation:
@@ -32,13 +30,11 @@ The user selects one of two modes before running the calculation:
 | **Loose Load** | Cases are stacked directly on the container floor. The tool plans exact floor positions and stack heights. |
 | **Palletized** | Cases are grouped onto pallets. The tool allocates pallets to containers by count and weight, without planning floor positions. |
 
-#### Loose Load
-CBM utilization is colour-coded in the results:
+**Loose Load:** CBM utilization is colour-coded in the results:
 - **Below 80%** — displayed in red (poor utilization; consider consolidation)
 - **80% and above** — displayed in blue (acceptable)
 
-#### Palletized
-Pallet utilization is colour-coded in the results:
+**Palletized:** Spot utilization is colour-coded in the results:
 - **Below limit** - displayed in red (poor utilization; consider consolition)
 - **At limit** - displayed in blue (acceptable)
 
@@ -54,9 +50,7 @@ The tool works with three standard dry container sizes:
 | 40ft Standard | 12.03 m | 2.35 m | 2.39 m | 58 m³ | 26,730 | 20 |
 | 40ft High Cube | 12.03 m | 2.35 m | 2.69 m | 68 m³ | 26,540 | 20 |
 
-> **Note on CBM limits:** For the loose load mode, the CBM utilization metric is calculated against these declared limits (not the raw geometric volume of the container). This reflects typical industry practice where unusable corner space is factored in.
-
-
+For the loose load mode, the CBM utilization metric is calculated against these declared limits (not the raw geometric volume of the container). This reflects typical industry practice where unusable corner space is factored in.
 
 ---
 
