@@ -4,7 +4,7 @@
 
 ## 1. Inputs
 
-### 1 Product Master (Excel file)
+### 1.1 Product Master (Excel file)
 
 The product master is the catalogue of all shippable products. The tool reads the first worksheet and requires the following columns (column names are matched flexibly, case-insensitively):
 
@@ -164,6 +164,7 @@ WHILE total weight > limit:
         Remove the entire last product from this container; move it to overflow.
         Repeat.
 ```
+
 
 ---
 
