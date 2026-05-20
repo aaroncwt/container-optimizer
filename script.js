@@ -372,23 +372,32 @@ function packOrder(order, container) {
         let bestRect = null,
             bestX = Infinity,
             bestY = Infinity,
-            bestWaste = Infinity,
+            bestShortSideFit = Infinity,
+            bestLongSideFit = Infinity,
             bestSL, bestSW;
         for (const rect of freeRects) {
             for (const [sl, sw] of [
-                    [stack.case_length, stack.case_width],
-                    [stack.case_width, stack.case_length]
-                ]) {
+                [stack.case_length, stack.case_width],
+                [stack.case_width, stack.case_length]
+            ]) {
                 if (sl <= rect.length + .001 && sw <= rect.width + .001) {
-                    const waste = rect.length * rect.width - sl * sw;
+                    const leftoverL = Math.max(0, rect.length - sl);
+                    const leftoverW = Math.max(0, rect.width - sw);
+                    const shortSideFit = Math.min(leftoverL, leftoverW);
+                    const longSideFit = Math.max(leftoverL, leftoverW);
+
                     const isBetter = bestRect === null ||
-                        rect.x < bestX - 0.001 ||
-                        (Math.abs(rect.x - bestX) <= 0.001 && rect.y < bestY - 0.001) ||
-                        (Math.abs(rect.x - bestX) <= 0.001 && Math.abs(rect.y - bestY) <= 0.001 && waste < bestWaste);
+                        shortSideFit < bestShortSideFit - 0.001 ||
+                        (Math.abs(shortSideFit - bestShortSideFit) <= 0.001 && longSideFit < bestLongSideFit - 0.001) ||
+                        (Math.abs(shortSideFit - bestShortSideFit) <= 0.001 && Math.abs(longSideFit - bestLongSideFit) <= 0.001 && (
+                            rect.x < bestX - 0.001 ||
+                            (Math.abs(rect.x - bestX) <= 0.001 && rect.y < bestY - 0.001)
+                        ));
                     if (isBetter) {
                         bestX = rect.x;
                         bestY = rect.y;
-                        bestWaste = waste;
+                        bestShortSideFit = shortSideFit;
+                        bestLongSideFit = longSideFit;
                         bestRect = rect;
                         bestSL = sl;
                         bestSW = sw;
@@ -411,21 +420,36 @@ function packOrder(order, container) {
             physical_height: stack.physical_height,
             gross_weight_kg: stack.gross_weight_kg
         });
-        const rR = {
-            x: bestRect.x + bestSL,
-            y: bestRect.y,
-            length: bestRect.length - bestSL,
-            width: bestSW
-        };
-        const rT = {
-            x: bestRect.x,
-            y: bestRect.y + bestSW,
-            length: bestRect.length,
-            width: bestRect.width - bestSW
-        };
-        freeRects = freeRects.filter(r => r !== bestRect);
-        if (rR.length > .001 && rR.width > .001) freeRects.push(rR);
-        if (rT.length > .001 && rT.width > .001) freeRects.push(rT);
+        // Maximal rectangles: split all overlapping free rects
+        const px = bestRect.x, py = bestRect.y;
+        const px2 = px + bestSL, py2 = py + bestSW;
+        const newFree = [];
+        for (const r of freeRects) {
+            const rx2 = r.x + r.length, ry2 = r.y + r.width;
+            if (px2 <= r.x + .001 || px >= rx2 - .001 ||
+                py2 <= r.y + .001 || py >= ry2 - .001) {
+                newFree.push(r);
+                continue;
+            }
+            if (px > r.x + .001)
+                newFree.push({ x: r.x, y: r.y, length: px - r.x, width: r.width });
+            if (px2 < rx2 - .001)
+                newFree.push({ x: px2, y: r.y, length: rx2 - px2, width: r.width });
+            if (py > r.y + .001)
+                newFree.push({ x: r.x, y: r.y, length: r.length, width: py - r.y });
+            if (py2 < ry2 - .001)
+                newFree.push({ x: r.x, y: py2, length: r.length, width: ry2 - py2 });
+        }
+        freeRects = newFree.filter((a, i) => {
+            for (let j = 0; j < newFree.length; j++) {
+                if (i === j) continue;
+                const b = newFree[j];
+                if (a.x >= b.x - .001 && a.y >= b.y - .001 &&
+                    a.x + a.length <= b.x + b.length + .001 &&
+                    a.y + a.width <= b.y + b.width + .001) return false;
+            }
+            return true;
+        });
     }
 
     const byCode = {};
@@ -995,77 +1019,77 @@ function runPacking() {
     btn.innerHTML = '<i class="ti ti-loader-2 animate-spin" style="font-size: 24px;"></i> Processing...';
 
     setTimeout(() => {
-                const out = $('results');
-                if (!orderLines.length) {
-                    btn.disabled = false;
-                    btn.innerHTML = originalContent;
-                    return out.innerHTML = '<div class="msg-error"><i class="ti ti-alert-circle"></i> Add at least one product.</div>';
-                }
-                const bad = orderLines.filter(l => !catalogue[l.code]);
-                if (bad.length) {
-                    btn.disabled = false;
-                    btn.innerHTML = originalContent;
-                    return out.innerHTML = `<div class="msg-error"><i class="ti ti-alert-triangle"></i> Not in catalogue: ${bad.map(l => l.code).join(', ')}.</div>`;
-                }
+        const out = $('results');
+        if (!orderLines.length) {
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+            return out.innerHTML = '<div class="msg-error"><i class="ti ti-alert-circle"></i> Add at least one product.</div>';
+        }
+        const bad = orderLines.filter(l => !catalogue[l.code]);
+        if (bad.length) {
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+            return out.innerHTML = `<div class="msg-error"><i class="ti ti-alert-triangle"></i> Not in catalogue: ${bad.map(l => l.code).join(', ')}.</div>`;
+        }
 
-                const order = orderLines.map(l => {
-                    const d = catalogue[l.code];
-                    return {
-                        code: l.code,
-                        name: d.name,
-                        case_count: l.cases,
-                        case_length: d.case_length_cm,
-                        case_width: d.case_width_cm,
-                        case_height: d.case_height_cm,
-                        gross_weight_kg: d.gross_weight_kg,
-                        max_stack_height: d.max_stack_height,
-                        cases_per_pallet: d.cases_per_pallet
-                    };
-                });
+        const order = orderLines.map(l => {
+            const d = catalogue[l.code];
+            return {
+                code: l.code,
+                name: d.name,
+                case_count: l.cases,
+                case_length: d.case_length_cm,
+                case_width: d.case_width_cm,
+                case_height: d.case_height_cm,
+                gross_weight_kg: d.gross_weight_kg,
+                max_stack_height: d.max_stack_height,
+                cases_per_pallet: d.cases_per_pallet
+            };
+        });
 
-                const loadMethod = document.querySelector('input[name="loadMethod"]:checked').value;
+        const loadMethod = document.querySelector('input[name="loadMethod"]:checked').value;
 
-                if (loadMethod === 'palletized') {
-                    const badPallet = order.filter(item => !item.cases_per_pallet || item.cases_per_pallet <= 0);
-                    if (badPallet.length) {
-                        btn.disabled = false;
-                        btn.innerHTML = originalContent;
-                        return out.innerHTML = `<div class="msg-error"><i class="ti ti-alert-triangle"></i> Cannot pack palletized: missing or invalid 'Cases Per Pallet' for ${badPallet.map(i => i.code).join(', ')}.</div>`;
-                    }
-                }
+        if (loadMethod === 'palletized') {
+            const badPallet = order.filter(item => !item.cases_per_pallet || item.cases_per_pallet <= 0);
+            if (badPallet.length) {
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+                return out.innerHTML = `<div class="msg-error"><i class="ti ti-alert-triangle"></i> Cannot pack palletized: missing or invalid 'Cases Per Pallet' for ${badPallet.map(i => i.code).join(', ')}.</div>`;
+            }
+        }
 
-                const selResult = loadMethod === 'palletized' ? selectPalletContainers(order) : selectContainers(order);
-                if (!selResult.success) {
-                    btn.disabled = false;
-                    btn.innerHTML = originalContent;
-                    out.innerHTML = `<div class="msg-error"><i class="ti ti-alert-triangle"></i> ${selResult.reason}</div>`;
-                    return;
-                }
+        const selResult = loadMethod === 'palletized' ? selectPalletContainers(order) : selectContainers(order);
+        if (!selResult.success) {
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+            out.innerHTML = `<div class="msg-error"><i class="ti ti-alert-triangle"></i> ${selResult.reason}</div>`;
+            return;
+        }
 
-                // Build global color map across all containers
-                const allCodes = new Set();
-                for (const c of selResult.containers) {
-                    for (const code of Object.keys(c.result.placement_plan)) allCodes.add(code);
-                }
-                const colorMap = {};
-                let ci = 0;
-                for (const code of allCodes) {
-                    colorMap[code] = {
-                        fg: COLORS[ci % COLORS.length],
-                        bg: COLORS_L[ci % COLORS_L.length],
-                        num: ci + 1
-                    };
-                    ci++;
-                }
+        // Build global color map across all containers
+        const allCodes = new Set();
+        for (const c of selResult.containers) {
+            for (const code of Object.keys(c.result.placement_plan)) allCodes.add(code);
+        }
+        const colorMap = {};
+        let ci = 0;
+        for (const code of allCodes) {
+            colorMap[code] = {
+                fg: COLORS[ci % COLORS.length],
+                bg: COLORS_L[ci % COLORS_L.length],
+                num: ci + 1
+            };
+            ci++;
+        }
 
-                // Aggregate metrics
-                const totalCases = selResult.containers.reduce((s, c) => s + c.result.metrics.total_cases, 0);
-                const totalWeight = selResult.containers.reduce((s, c) => s + c.result.metrics.total_weight, 0);
-                const containerCount = selResult.containers.length;
+        // Aggregate metrics
+        const totalCases = selResult.containers.reduce((s, c) => s + c.result.metrics.total_cases, 0);
+        const totalWeight = selResult.containers.reduce((s, c) => s + c.result.metrics.total_weight, 0);
+        const containerCount = selResult.containers.length;
 
-                let containerTableHtml = '';
-                if (loadMethod === 'palletized') {
-                    containerTableHtml = `
+        let containerTableHtml = '';
+        if (loadMethod === 'palletized') {
+            containerTableHtml = `
           <div style="margin-top: 1rem;">
             <table class="expandable-table">
               <thead>
@@ -1080,10 +1104,10 @@ function runPacking() {
               </thead>
               <tbody>
                 ${selResult.containers.map((c, i) => {
-            const m = c.result.metrics;
-            const wl = WEIGHT_LIMITS[c.type];
+                const m = c.result.metrics;
+                const wl = WEIGHT_LIMITS[c.type];
 
-            let innerTable = `
+                let innerTable = `
                     <div class="stack-details-container">
                       <table class="stack-table">
                         <thead>
@@ -1097,11 +1121,11 @@ function runPacking() {
                         </thead>
                         <tbody>`;
 
-            for (const [code, positions] of Object.entries(c.result.placement_plan)) {
-              const totCases = positions.reduce((s, p) => s + p.cases, 0);
-              const totPallets = positions.length;
-              const totWeight = positions.reduce((s, p) => s + p.weight, 0);
-              innerTable += `
+                for (const [code, positions] of Object.entries(c.result.placement_plan)) {
+                    const totCases = positions.reduce((s, p) => s + p.cases, 0);
+                    const totPallets = positions.length;
+                    const totWeight = positions.reduce((s, p) => s + p.weight, 0);
+                    innerTable += `
                           <tr>
                             <td style="font-weight: 600; color: var(--color-text-primary);">${code}</td>
                             <td>${positions[0].name}</td>
@@ -1109,11 +1133,11 @@ function runPacking() {
                             <td style="text-align: center;">${totPallets}</td>
                             <td style="text-align: center;">${totWeight.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
                           </tr>`;
-            }
+                }
 
-            innerTable += `</tbody></table></div>`;
+                innerTable += `</tbody></table></div>`;
 
-                    return `
+                return `
                   <tr class="product-row" onclick="toggleProductStacks(this)" style="background-color: var(--color-background-secondary);">
                     <td style="text-align: center;"><i class="ti ti-chevron-right" style="transition: transform 0.2s;"></i></td>
                     <td style="font-family: var(--font-mono); font-weight: 700; color: var(--color-text-primary);">#${i + 1}</td>
@@ -1127,13 +1151,13 @@ function runPacking() {
                       ${innerTable}
                     </td>
                   </tr>`;
-                }).join('')
-              }
+            }).join('')
+                }
               </tbody>
             </table>
           </div>`;
-} else {
-    containerTableHtml = `
+        } else {
+            containerTableHtml = `
           <div class="data-table-wrapper" style="margin-top: 1rem;">
             <table class="data-table">
               <thead>
@@ -1149,10 +1173,10 @@ function runPacking() {
               </thead>
               <tbody>
                 ${selResult.containers.map((c, i) => {
-            const m = c.result.metrics;
-            const wl = WEIGHT_LIMITS[c.type];
-            const utilColor = m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)';
-            return `
+                const m = c.result.metrics;
+                const wl = WEIGHT_LIMITS[c.type];
+                const utilColor = m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)';
+                return `
                   <tr>
                     <td class="font-mono font-bold text-muted">${i + 1}</td>
                     <td class="font-semibold">${CONTAINER_LABELS[c.type]}</td>
@@ -1162,14 +1186,14 @@ function runPacking() {
                     <td class="text-center">${m.total_cbm.toFixed(1)} <span class="text-muted" style="font-size:12px;">/ ${m.container_cbm.toFixed(1)}</span></td>
                     <td class="text-center">${Math.round(m.total_weight).toLocaleString()} <span class="text-muted" style="font-size:12px;">/ ${wl.toLocaleString()}</span></td>
                   </tr>`;
-          }).join('')}
+            }).join('')}
               </tbody>
             </table>
           </div>`;
-}
+        }
 
-const totalPallets = loadMethod === 'palletized' ? selResult.containers.reduce((s, c) => s + c.result.metrics.pallets, 0) : 0;
-let html = `
+        const totalPallets = loadMethod === 'palletized' ? selResult.containers.reduce((s, c) => s + c.result.metrics.pallets, 0) : 0;
+        let html = `
     <div class="card" style="margin-bottom:3rem; padding: 2.5rem;">
       <div class="container-title" style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--color-border-secondary); padding-bottom: 1.5rem;">
         <i class="ti ti-chart-bar" style="font-size:24px;color:var(--color-brand);"></i> 
@@ -1189,18 +1213,18 @@ let html = `
       </div>
     </div>`;
 
-// Per-container results - skip for palletized as info is in summary
-if (loadMethod === 'loose') {
-    for (const [idx, ctn] of selResult.containers.entries()) {
-        const cLabel = CONTAINER_LABELS[ctn.type];
-        const cDims = ctn.container;
-        const m = ctn.result.metrics;
-        const wl = WEIGHT_LIMITS[ctn.type];
+        // Per-container results - skip for palletized as info is in summary
+        if (loadMethod === 'loose') {
+            for (const [idx, ctn] of selResult.containers.entries()) {
+                const cLabel = CONTAINER_LABELS[ctn.type];
+                const cDims = ctn.container;
+                const m = ctn.result.metrics;
+                const wl = WEIGHT_LIMITS[ctn.type];
 
-        const viz = renderViz(ctn.result.floor_plan, cDims, colorMap);
-        const isoViz = renderIsoViz(ctn.result.floor_plan, cDims, colorMap);
+                const viz = renderViz(ctn.result.floor_plan, cDims, colorMap);
+                const isoViz = renderIsoViz(ctn.result.floor_plan, cDims, colorMap);
 
-        let detail = `
+                let detail = `
             <table class="expandable-table">
               <thead>
                 <tr>
@@ -1214,12 +1238,12 @@ if (loadMethod === 'loose') {
               </thead>
               <tbody>`;
 
-        for (const [code, positions] of Object.entries(ctn.result.placement_plan)) {
-            const col = colorMap[code];
-            const tot = loadMethod === 'loose' ? positions.reduce((s, p) => s + p.cases_in_stack, 0) : positions.reduce((s, p) => s + p.cases, 0);
-            const wt = loadMethod === 'loose' ? positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0) : positions.reduce((s, p) => s + p.weight, 0);
+                for (const [code, positions] of Object.entries(ctn.result.placement_plan)) {
+                    const col = colorMap[code];
+                    const tot = loadMethod === 'loose' ? positions.reduce((s, p) => s + p.cases_in_stack, 0) : positions.reduce((s, p) => s + p.cases, 0);
+                    const wt = loadMethod === 'loose' ? positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0) : positions.reduce((s, p) => s + p.weight, 0);
 
-            detail += `
+                    detail += `
               <tr class="product-row" onclick="toggleProductStacks(this)" style="background-color: ${col.bg};">
                 <td class="text-center"><i class="ti ti-chevron-right" style="transition: transform 0.2s;"></i></td>
                 <td class="font-semibold">${code}</td>
@@ -1256,24 +1280,24 @@ if (loadMethod === 'loose') {
                   </div>
                 </td>
               </tr>`;
-        }
-        detail += '</tbody></table>';
+                }
+                detail += '</tbody></table>';
 
-        let containerMetricsHtml = loadMethod === 'loose' ?
-            `<div class="metric-flat-grid">
+                let containerMetricsHtml = loadMethod === 'loose' ?
+                    `<div class="metric-flat-grid">
                 <div class="metric-flat"><div class="val">${m.total_cases}</div><div class="lbl">cases</div></div>
                 <div class="metric-flat"><div class="val">${m.stacks}</div><div class="lbl">stacks</div></div>
                 <div class="metric-flat"><div class="val" style="color:${m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)'}">${m.volume_utilisation}%</div><div class="lbl">CBM util.</div></div>
                 <div class="metric-flat"><div class="val">${m.total_cbm.toFixed(1)} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${m.container_cbm.toFixed(1)}</span></div><div class="lbl">volume (m³)</div></div>
                 <div class="metric-flat"><div class="val">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${wl.toLocaleString()}</span></div><div class="lbl">gross weight (kg)</div></div>
               </div>` :
-            `<div class="metric-flat-grid">
+                    `<div class="metric-flat-grid">
                 <div class="metric-flat"><div class="val">${m.total_cases}</div><div class="lbl">cases</div></div>
                 <div class="metric-flat"><div class="val">${m.pallets} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${PALLET_CAPACITY[ctn.type]}</span></div><div class="lbl">pallets</div></div>
                 <div class="metric-flat"><div class="val">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${wl.toLocaleString()}</span></div><div class="lbl">gross weight (kg)</div></div>
               </div>`;
 
-        let vizSections = loadMethod === 'loose' ? `
+                let vizSections = loadMethod === 'loose' ? `
             <div class="container-section">
               <div class="container-section-title"><i class="ti ti-layout-board"></i> Floor Plan</div>
               <div class="viz-wrapper">${viz}</div>
@@ -1284,7 +1308,7 @@ if (loadMethod === 'loose') {
             </div>
           ` : '';
 
-        html += `
+                html += `
     <div class="card container-card">
       <div class="container-header">
         <div class="container-title">
@@ -1303,19 +1327,19 @@ if (loadMethod === 'loose') {
         </div>
       </div>
     </div>`;
-    }
-}
+            }
+        }
 
-out.innerHTML = html;
-btn.disabled = false;
-btn.innerHTML = originalContent;
+        out.innerHTML = html;
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
 
-// Scroll down slightly to display the results
-window.scrollBy({
-top: 400,
-behavior: 'smooth'
-});
-}, 1000);
+        // Scroll down slightly to display the results
+        window.scrollBy({
+            top: 400,
+            behavior: 'smooth'
+        });
+    }, 1000);
 }
 
 function toggleProductStacks(el) {
