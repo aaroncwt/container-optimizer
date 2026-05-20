@@ -116,16 +116,16 @@ For each stack, the algorithm finds the **best-fit placement**:
 1. For each free rectangle, test both orientations of the stack's footprint (length × width, and width × length).
 2. Discard orientations that don't fit within the rectangle's bounds.
 3. Among valid placements, select the one that:
-   - Is **furthest from the door** (highest x-coordinate first), then
-   - Furthest to one side (highest y-coordinate), then
+   - Is **furthest from the door** (lowest x-coordinate first), then
+   - Furthest to one side (lowest y-coordinate), then
    - Has the **least wasted area** (tightest fit).
 
 > **Business rationale for loading from the back:** Filling the deepest positions first reflects real-world container loading practice — goods loaded first end up furthest from the doors.
 
 4. Place the stack at the chosen position.
 5. **Split the used rectangle** into two remaining free rectangles:
-   - A rectangle to the **right** of the placed stack (same depth, remaining width).
-   - A rectangle **above** the placed stack (full depth of the original rect, remaining height).
+   - A rectangle **towards the door** from the placed stack (remaining depth, same width).
+   - A rectangle to the **side** of the placed stack (full depth of the original rect, remaining width).
 
 If no free rectangle can accommodate a stack, packing fails — the order exceeds this container's floor area.
 
