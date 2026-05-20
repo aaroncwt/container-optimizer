@@ -83,6 +83,9 @@ function parseCatalogue(rows, fname) {
     const colGW = findCol(keys, 'gross', 'weight', 'gw', 'kg');
     const colStack = findCol(keys, 'stack', 'max stack', 'max_stack');
     const colCPP = findCol(keys, 'cases per pallet', 'cpp');
+    const colContainerGroup = findCol(keys, 'container group', 'container_group', 'containergroup');
+    const colRTM = findCol(keys, 'rtm');
+    const colVendor = findCol(keys, 'vendor');
 
     const missing = [];
     if (!colCode) missing.push('Product Code');
@@ -92,7 +95,10 @@ function parseCatalogue(rows, fname) {
     if (!colH) missing.push('Height');
     if (!colGW) missing.push('Gross Weight');
     if (!colCPP) missing.push('Cases Per Pallet');
-    if (missing.length) throw new Error(`Could not find columns: ${missing.join(', ')}. Expected: Product Code, Product Name, Length, Width, Height (mm), Gross Weight (kg), Cases Per Pallet.`);
+    if (!colContainerGroup) missing.push('Container Group');
+    if (!colRTM) missing.push('RTM');
+    if (!colVendor) missing.push('Vendor');
+    if (missing.length) throw new Error(`Could not find columns: ${missing.join(', ')}. Expected: Product Code, Product Name, Length, Width, Height (mm), Gross Weight (kg), Cases Per Pallet, Container Group, RTM, Vendor.`);
 
     catalogue = {};
     catCodes = [];
@@ -106,6 +112,9 @@ function parseCatalogue(rows, fname) {
         const gw = parseFloat(r[colGW]);
         const cpp = parseInt(r[colCPP]);
         const ms = colStack && r[colStack] !== '' ? parseInt(r[colStack]) : undefined;
+        const containerGroup = String(r[colContainerGroup]).trim();
+        const rtm = String(r[colRTM]).trim();
+        const vendor = String(r[colVendor]).trim();
         if (!code || !name || isNaN(lMM) || isNaN(wMM) || isNaN(hMM) || isNaN(gw)) {
             skipped++;
             continue;
@@ -117,7 +126,10 @@ function parseCatalogue(rows, fname) {
             case_height_cm: hMM / 10,
             gross_weight_kg: gw,
             cases_per_pallet: isNaN(cpp) ? 0 : cpp,
-            max_stack_height: ms
+            max_stack_height: ms,
+            container_group: containerGroup,
+            rtm,
+            vendor
         };
         catCodes.push(code);
     }
@@ -648,6 +660,55 @@ function renderViz(floorPlan, container, colorMap) {
   </svg>`;
 }
 
+/* ── Order splitting by container rules ── */
+
+/**
+ * Split order items into groups that can share containers, based on:
+ * - Container Group (must be homogenous; blank = exclude)
+ * - RTM (must be homogenous; blank = exclude)
+ * - Vendor (only for RTM=WU02; must be homogenous; blank = exclude)
+ *
+ * Returns { groups: [{ key, label, items }], excluded: [{ code, name, cases, reason }] }
+ */
+function splitOrderByContainerRules(order) {
+    const groups = {};
+    const excluded = [];
+
+    for (const item of order) {
+        const d = catalogue[item.code];
+        const cg = d.container_group;
+        const rtm = d.rtm;
+        const vendor = d.vendor;
+
+        // Check exclusion conditions
+        if (!cg) {
+            excluded.push({ code: item.code, name: item.name, cases: item.case_count, reason: 'Blank Container Group' });
+            continue;
+        }
+        if (!rtm) {
+            excluded.push({ code: item.code, name: item.name, cases: item.case_count, reason: 'Blank RTM' });
+            continue;
+        }
+        if (rtm.toUpperCase() === 'WU02' && !vendor) {
+            excluded.push({ code: item.code, name: item.name, cases: item.case_count, reason: 'Blank Vendor (RTM is WU02)' });
+            continue;
+        }
+
+        // Build grouping key
+        const vendorPart = rtm.toUpperCase() === 'WU02' ? vendor : '*';
+        const key = `${cg}||${rtm}||${vendorPart}`;
+
+        if (!groups[key]) {
+            const labelParts = [`Group: ${cg}`, `RTM: ${rtm}`];
+            if (rtm.toUpperCase() === 'WU02') labelParts.push(`Vendor: ${vendor}`);
+            groups[key] = { key, label: labelParts.join(' · '), items: [] };
+        }
+        groups[key].items.push(item);
+    }
+
+    return { groups: Object.values(groups), excluded };
+}
+
 /* ── Auto container-selection algorithm ── */
 
 function selectContainers(orderItems) {
@@ -1049,8 +1110,26 @@ function runPacking() {
 
         const loadMethod = document.querySelector('input[name="loadMethod"]:checked').value;
 
+        // Split order into container-compatible groups
+        const { groups, excluded } = splitOrderByContainerRules(order);
+
+        if (groups.length === 0 && excluded.length > 0) {
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+            out.innerHTML = `<div class="msg-error"><i class="ti ti-alert-triangle"></i> All products were excluded from containerization. Check Container Group, RTM, and Vendor fields in the product master.</div>`;
+            return;
+        }
+
+        if (groups.length === 0) {
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+            return out.innerHTML = '<div class="msg-error"><i class="ti ti-alert-circle"></i> No containerizable products found.</div>';
+        }
+
+        // Palletized validation across all groups
         if (loadMethod === 'palletized') {
-            const badPallet = order.filter(item => !item.cases_per_pallet || item.cases_per_pallet <= 0);
+            const allGroupItems = groups.flatMap(g => g.items);
+            const badPallet = allGroupItems.filter(item => !item.cases_per_pallet || item.cases_per_pallet <= 0);
             if (badPallet.length) {
                 btn.disabled = false;
                 btn.innerHTML = originalContent;
@@ -1058,18 +1137,25 @@ function runPacking() {
             }
         }
 
-        const selResult = loadMethod === 'palletized' ? selectPalletContainers(order) : selectContainers(order);
-        if (!selResult.success) {
-            btn.disabled = false;
-            btn.innerHTML = originalContent;
-            out.innerHTML = `<div class="msg-error"><i class="ti ti-alert-triangle"></i> ${selResult.reason}</div>`;
-            return;
+        // Containerize each group independently
+        const groupResults = [];
+        for (const group of groups) {
+            const selResult = loadMethod === 'palletized' ? selectPalletContainers(group.items) : selectContainers(group.items);
+            if (!selResult.success) {
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+                out.innerHTML = `<div class="msg-error"><i class="ti ti-alert-triangle"></i> Group "${group.label}": ${selResult.reason}</div>`;
+                return;
+            }
+            groupResults.push({ group, selResult });
         }
 
-        // Build global color map across all containers
+        // Build global color map across all groups and containers
         const allCodes = new Set();
-        for (const c of selResult.containers) {
-            for (const code of Object.keys(c.result.placement_plan)) allCodes.add(code);
+        for (const { selResult } of groupResults) {
+            for (const c of selResult.containers) {
+                for (const code of Object.keys(c.result.placement_plan)) allCodes.add(code);
+            }
         }
         const colorMap = {};
         let ci = 0;
@@ -1082,32 +1168,26 @@ function runPacking() {
             ci++;
         }
 
-        // Aggregate metrics
-        const totalCases = selResult.containers.reduce((s, c) => s + c.result.metrics.total_cases, 0);
-        const totalWeight = selResult.containers.reduce((s, c) => s + c.result.metrics.total_weight, 0);
-        const containerCount = selResult.containers.length;
+        // Aggregate metrics across all groups
+        const allContainers = groupResults.flatMap(gr => gr.selResult.containers);
+        const totalCases = allContainers.reduce((s, c) => s + c.result.metrics.total_cases, 0);
+        const totalWeight = allContainers.reduce((s, c) => s + c.result.metrics.total_weight, 0);
+        const containerCount = allContainers.length;
+        const totalPallets = loadMethod === 'palletized' ? allContainers.reduce((s, c) => s + c.result.metrics.pallets, 0) : 0;
 
+        // Build summary table across all groups
         let containerTableHtml = '';
-        if (loadMethod === 'palletized') {
-            containerTableHtml = `
-          <div style="margin-top: 1rem;">
-            <table class="expandable-table">
-              <thead>
-                <tr>
-                  <th style="width: 40px;"></th>
-                  <th>Container</th>
-                  <th>Type</th>
-                  <th style="text-align: center;">Cases</th>
-                  <th style="text-align: center;">Pallets</th>
-                  <th style="text-align: center;">Weight (kg)</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${selResult.containers.map((c, i) => {
-                const m = c.result.metrics;
-                const wl = WEIGHT_LIMITS[c.type];
+        let globalContainerIdx = 0;
 
-                let innerTable = `
+        if (loadMethod === 'palletized') {
+            let tableRows = '';
+            for (const { group, selResult } of groupResults) {
+                for (const c of selResult.containers) {
+                    globalContainerIdx++;
+                    const m = c.result.metrics;
+                    const wl = WEIGHT_LIMITS[c.type];
+
+                    let innerTable = `
                     <div class="stack-details-container">
                       <table class="stack-table">
                         <thead>
@@ -1121,11 +1201,11 @@ function runPacking() {
                         </thead>
                         <tbody>`;
 
-                for (const [code, positions] of Object.entries(c.result.placement_plan)) {
-                    const totCases = positions.reduce((s, p) => s + p.cases, 0);
-                    const totPallets = positions.length;
-                    const totWeight = positions.reduce((s, p) => s + p.weight, 0);
-                    innerTable += `
+                    for (const [code, positions] of Object.entries(c.result.placement_plan)) {
+                        const totCases = positions.reduce((s, p) => s + p.cases, 0);
+                        const totPallets = positions.length;
+                        const totWeight = positions.reduce((s, p) => s + p.weight, 0);
+                        innerTable += `
                           <tr>
                             <td style="font-weight: 600; color: var(--color-text-primary);">${code}</td>
                             <td>${positions[0].name}</td>
@@ -1133,30 +1213,69 @@ function runPacking() {
                             <td style="text-align: center;">${totPallets}</td>
                             <td style="text-align: center;">${totWeight.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
                           </tr>`;
-                }
+                    }
 
-                innerTable += `</tbody></table></div>`;
+                    innerTable += `</tbody></table></div>`;
 
-                return `
-                  <tr class="product-row" onclick="toggleProductStacks(this)" style="background-color: var(--color-background-secondary);">
-                    <td style="text-align: center;"><i class="ti ti-chevron-right" style="transition: transform 0.2s;"></i></td>
-                    <td style="font-family: var(--font-mono); font-weight: 700; color: var(--color-text-primary);">#${i + 1}</td>
-                    <td style="font-weight: 600;">${CONTAINER_LABELS[c.type]}</td>
-                    <td style="text-align: center;">${m.total_cases}</td>
-                    <td style="text-align: center;">${m.pallets} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${PALLET_CAPACITY[c.type]}</span></td>
-                    <td style="text-align: center;">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${wl.toLocaleString()}</span></td>
-                  </tr>
-                  <tr class="stack-details-row">
-                    <td colspan="6">
-                      ${innerTable}
-                    </td>
-                  </tr>`;
-            }).join('')
+                    tableRows += `
+                      <tr class="product-row" onclick="toggleProductStacks(this)" style="background-color: var(--color-background-secondary);">
+                        <td style="text-align: center;"><i class="ti ti-chevron-right" style="transition: transform 0.2s;"></i></td>
+                        <td style="font-family: var(--font-mono); font-weight: 700; color: var(--color-text-primary);">#${globalContainerIdx}</td>
+                        <td style="font-weight: 600;">${CONTAINER_LABELS[c.type]}</td>
+                        <td style="font-size: 12px; color: var(--color-text-secondary);">${group.label}</td>
+                        <td style="text-align: center;">${m.total_cases}</td>
+                        <td style="text-align: center;">${m.pallets} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${PALLET_CAPACITY[c.type]}</span></td>
+                        <td style="text-align: center;">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${wl.toLocaleString()}</span></td>
+                      </tr>
+                      <tr class="stack-details-row">
+                        <td colspan="7">
+                          ${innerTable}
+                        </td>
+                      </tr>`;
                 }
+            }
+
+            containerTableHtml = `
+          <div style="margin-top: 1rem;">
+            <table class="expandable-table">
+              <thead>
+                <tr>
+                  <th style="width: 40px;"></th>
+                  <th>Container</th>
+                  <th>Type</th>
+                  <th>Group</th>
+                  <th style="text-align: center;">Cases</th>
+                  <th style="text-align: center;">Pallets</th>
+                  <th style="text-align: center;">Weight (kg)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tableRows}
               </tbody>
             </table>
           </div>`;
         } else {
+            let tableRows = '';
+            for (const { group, selResult } of groupResults) {
+                for (const c of selResult.containers) {
+                    globalContainerIdx++;
+                    const m = c.result.metrics;
+                    const wl = WEIGHT_LIMITS[c.type];
+                    const utilColor = m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)';
+                    tableRows += `
+                      <tr>
+                        <td class="font-mono font-bold text-muted">${globalContainerIdx}</td>
+                        <td class="font-semibold">${CONTAINER_LABELS[c.type]}</td>
+                        <td style="font-size: 12px; color: var(--color-text-secondary);">${group.label}</td>
+                        <td class="text-center">${m.total_cases}</td>
+                        <td class="text-center">${m.stacks}</td>
+                        <td class="text-center font-semibold" style="color:${utilColor}">${m.volume_utilisation}%</td>
+                        <td class="text-center">${m.total_cbm.toFixed(1)} <span class="text-muted" style="font-size:12px;">/ ${m.container_cbm.toFixed(1)}</span></td>
+                        <td class="text-center">${Math.round(m.total_weight).toLocaleString()} <span class="text-muted" style="font-size:12px;">/ ${wl.toLocaleString()}</span></td>
+                      </tr>`;
+                }
+            }
+
             containerTableHtml = `
           <div class="data-table-wrapper" style="margin-top: 1rem;">
             <table class="data-table">
@@ -1164,6 +1283,7 @@ function runPacking() {
                 <tr>
                   <th style="width: 40px;">#</th>
                   <th>Type</th>
+                  <th>Group</th>
                   <th class="text-center">Cases</th>
                   <th class="text-center">Stacks</th>
                   <th class="text-center">CBM Util.</th>
@@ -1172,32 +1292,17 @@ function runPacking() {
                 </tr>
               </thead>
               <tbody>
-                ${selResult.containers.map((c, i) => {
-                const m = c.result.metrics;
-                const wl = WEIGHT_LIMITS[c.type];
-                const utilColor = m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)';
-                return `
-                  <tr>
-                    <td class="font-mono font-bold text-muted">${i + 1}</td>
-                    <td class="font-semibold">${CONTAINER_LABELS[c.type]}</td>
-                    <td class="text-center">${m.total_cases}</td>
-                    <td class="text-center">${m.stacks}</td>
-                    <td class="text-center font-semibold" style="color:${utilColor}">${m.volume_utilisation}%</td>
-                    <td class="text-center">${m.total_cbm.toFixed(1)} <span class="text-muted" style="font-size:12px;">/ ${m.container_cbm.toFixed(1)}</span></td>
-                    <td class="text-center">${Math.round(m.total_weight).toLocaleString()} <span class="text-muted" style="font-size:12px;">/ ${wl.toLocaleString()}</span></td>
-                  </tr>`;
-            }).join('')}
+                ${tableRows}
               </tbody>
             </table>
           </div>`;
         }
 
-        const totalPallets = loadMethod === 'palletized' ? selResult.containers.reduce((s, c) => s + c.result.metrics.pallets, 0) : 0;
         let html = `
     <div class="card" style="margin-bottom:3rem; padding: 2.5rem;">
       <div class="container-title" style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--color-border-secondary); padding-bottom: 1.5rem;">
         <i class="ti ti-chart-bar" style="font-size:24px;color:var(--color-brand);"></i> 
-        Summary: ${loadMethod === 'palletized' ? 'Palletized Load' : 'Loose Load'}
+        Summary: ${loadMethod === 'palletized' ? 'Palletized Load' : 'Loose Load'} — ${groups.length} group${groups.length !== 1 ? 's' : ''}
       </div>
       
       <div class="metric-flat-grid">
@@ -1205,6 +1310,8 @@ function runPacking() {
         <div class="metric-flat"><div class="val">${totalCases}</div><div class="lbl">cases packed</div></div>
         ${loadMethod === 'palletized' ? `<div class="metric-flat"><div class="val">${totalPallets}</div><div class="lbl">pallets</div></div>` : ''}
         <div class="metric-flat"><div class="val">${totalWeight.toLocaleString()}</div><div class="lbl">total weight (kg)</div></div>
+        <div class="metric-flat"><div class="val">${groups.length}</div><div class="lbl">product group${groups.length !== 1 ? 's' : ''}</div></div>
+        ${excluded.length > 0 ? `<div class="metric-flat"><div class="val" style="color:var(--color-text-danger);">${excluded.length}</div><div class="lbl">excluded</div></div>` : ''}
       </div>
       
       <div style="margin-top: 2rem;">
@@ -1213,18 +1320,21 @@ function runPacking() {
       </div>
     </div>`;
 
-        // Per-container results - skip for palletized as info is in summary
+        // Per-container results (loose load only)
+        globalContainerIdx = 0;
         if (loadMethod === 'loose') {
-            for (const [idx, ctn] of selResult.containers.entries()) {
-                const cLabel = CONTAINER_LABELS[ctn.type];
-                const cDims = ctn.container;
-                const m = ctn.result.metrics;
-                const wl = WEIGHT_LIMITS[ctn.type];
+            for (const { group, selResult } of groupResults) {
+                for (const ctn of selResult.containers) {
+                    globalContainerIdx++;
+                    const cLabel = CONTAINER_LABELS[ctn.type];
+                    const cDims = ctn.container;
+                    const m = ctn.result.metrics;
+                    const wl = WEIGHT_LIMITS[ctn.type];
 
-                const viz = renderViz(ctn.result.floor_plan, cDims, colorMap);
-                const isoViz = renderIsoViz(ctn.result.floor_plan, cDims, colorMap);
+                    const viz = renderViz(ctn.result.floor_plan, cDims, colorMap);
+                    const isoViz = renderIsoViz(ctn.result.floor_plan, cDims, colorMap);
 
-                let detail = `
+                    let detail = `
             <table class="expandable-table">
               <thead>
                 <tr>
@@ -1238,12 +1348,12 @@ function runPacking() {
               </thead>
               <tbody>`;
 
-                for (const [code, positions] of Object.entries(ctn.result.placement_plan)) {
-                    const col = colorMap[code];
-                    const tot = loadMethod === 'loose' ? positions.reduce((s, p) => s + p.cases_in_stack, 0) : positions.reduce((s, p) => s + p.cases, 0);
-                    const wt = loadMethod === 'loose' ? positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0) : positions.reduce((s, p) => s + p.weight, 0);
+                    for (const [code, positions] of Object.entries(ctn.result.placement_plan)) {
+                        const col = colorMap[code];
+                        const tot = positions.reduce((s, p) => s + p.cases_in_stack, 0);
+                        const wt = positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0);
 
-                    detail += `
+                        detail += `
               <tr class="product-row" onclick="toggleProductStacks(this)" style="background-color: ${col.bg};">
                 <td class="text-center"><i class="ti ti-chevron-right" style="transition: transform 0.2s;"></i></td>
                 <td class="font-semibold">${code}</td>
@@ -1258,10 +1368,10 @@ function runPacking() {
                     <table class="stack-table">
                       <thead>
                         <tr>
-                          <th>${loadMethod === 'loose' ? 'Stack' : 'Pallet'} #</th>
-                          ${loadMethod === 'loose' ? '<th>Footprint (L×W) (cm)</th>' : ''}
+                          <th>Stack #</th>
+                          <th>Footprint (L×W) (cm)</th>
                           <th style="text-align: center;">Cases</th>
-                          ${loadMethod === 'loose' ? '<th style="text-align: center;">Height (cm)</th>' : ''}
+                          <th style="text-align: center;">Height (cm)</th>
                           <th style="text-align: center;">Weight (kg)</th>
                         </tr>
                       </thead>
@@ -1269,10 +1379,10 @@ function runPacking() {
                         ${positions.map((p, i) => `
                           <tr>
                             <td class="font-semibold">#${i + 1}</td>
-                            ${loadMethod === 'loose' ? `<td>${p.footprint_l.toFixed(1)} × ${p.footprint_w.toFixed(1)}</td>` : ''}
-                            <td style="text-align: center;">${loadMethod === 'loose' ? p.cases_in_stack : p.cases}</td>
-                            ${loadMethod === 'loose' ? `<td style="text-align: center;">${p.physical_height.toFixed(1)}</td>` : ''}
-                            <td style="text-align: center;">${loadMethod === 'loose' ? (p.gross_weight_kg * p.cases_in_stack).toFixed(1) : p.weight.toFixed(1)}</td>
+                            <td>${p.footprint_l.toFixed(1)} × ${p.footprint_w.toFixed(1)}</td>
+                            <td style="text-align: center;">${p.cases_in_stack}</td>
+                            <td style="text-align: center;">${p.physical_height.toFixed(1)}</td>
+                            <td style="text-align: center;">${(p.gross_weight_kg * p.cases_in_stack).toFixed(1)}</td>
                           </tr>
                         `).join('')}
                       </tbody>
@@ -1280,45 +1390,35 @@ function runPacking() {
                   </div>
                 </td>
               </tr>`;
-                }
-                detail += '</tbody></table>';
+                    }
+                    detail += '</tbody></table>';
 
-                let containerMetricsHtml = loadMethod === 'loose' ?
-                    `<div class="metric-flat-grid">
-                <div class="metric-flat"><div class="val">${m.total_cases}</div><div class="lbl">cases</div></div>
-                <div class="metric-flat"><div class="val">${m.stacks}</div><div class="lbl">stacks</div></div>
-                <div class="metric-flat"><div class="val" style="color:${m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)'}">${m.volume_utilisation}%</div><div class="lbl">CBM util.</div></div>
-                <div class="metric-flat"><div class="val">${m.total_cbm.toFixed(1)} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${m.container_cbm.toFixed(1)}</span></div><div class="lbl">volume (m³)</div></div>
-                <div class="metric-flat"><div class="val">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${wl.toLocaleString()}</span></div><div class="lbl">gross weight (kg)</div></div>
-              </div>` :
-                    `<div class="metric-flat-grid">
-                <div class="metric-flat"><div class="val">${m.total_cases}</div><div class="lbl">cases</div></div>
-                <div class="metric-flat"><div class="val">${m.pallets} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${PALLET_CAPACITY[ctn.type]}</span></div><div class="lbl">pallets</div></div>
-                <div class="metric-flat"><div class="val">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${wl.toLocaleString()}</span></div><div class="lbl">gross weight (kg)</div></div>
-              </div>`;
-
-                let vizSections = loadMethod === 'loose' ? `
-            <div class="container-section">
-              <div class="container-section-title"><i class="ti ti-layout-board"></i> Floor Plan</div>
-              <div class="viz-wrapper">${viz}</div>
-            </div>
-            <div class="container-section">
-              <div class="container-section-title"><i class="ti ti-cube"></i> 3D View</div>
-              <div class="viz-wrapper">${isoViz}</div>
-            </div>
-          ` : '';
-
-                html += `
+                    html += `
     <div class="card container-card">
       <div class="container-header">
         <div class="container-title">
           <i class="ti ti-package" style="font-size:24px;color:var(--color-brand);"></i>
-          Container ${idx + 1} — ${cLabel}
+          Container ${globalContainerIdx} — ${cLabel}
         </div>
+        <div style="font-size: 13px; color: var(--color-text-secondary); margin-top: 4px;">${group.label}</div>
       </div>
 
-      ${containerMetricsHtml}
-      ${vizSections}
+      <div class="metric-flat-grid">
+        <div class="metric-flat"><div class="val">${m.total_cases}</div><div class="lbl">cases</div></div>
+        <div class="metric-flat"><div class="val">${m.stacks}</div><div class="lbl">stacks</div></div>
+        <div class="metric-flat"><div class="val" style="color:${m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)'}">${m.volume_utilisation}%</div><div class="lbl">CBM util.</div></div>
+        <div class="metric-flat"><div class="val">${m.total_cbm.toFixed(1)} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${m.container_cbm.toFixed(1)}</span></div><div class="lbl">volume (m³)</div></div>
+        <div class="metric-flat"><div class="val">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:14px;color:var(--color-text-tertiary);font-weight:500;">/ ${wl.toLocaleString()}</span></div><div class="lbl">gross weight (kg)</div></div>
+      </div>
+
+      <div class="container-section">
+        <div class="container-section-title"><i class="ti ti-layout-board"></i> Floor Plan</div>
+        <div class="viz-wrapper">${viz}</div>
+      </div>
+      <div class="container-section">
+        <div class="container-section-title"><i class="ti ti-cube"></i> 3D View</div>
+        <div class="viz-wrapper">${isoViz}</div>
+      </div>
 
       <div class="container-section">
         <div class="container-section-title"><i class="ti ti-list-details"></i> Placement Detail</div>
@@ -1327,7 +1427,44 @@ function runPacking() {
         </div>
       </div>
     </div>`;
+                }
             }
+        }
+
+        // Excluded products section
+        if (excluded.length > 0) {
+            html += `
+    <div class="card" style="margin-bottom:3rem; padding: 2.5rem;">
+      <div class="container-title" style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--color-border-secondary); padding-bottom: 1.5rem;">
+        <i class="ti ti-alert-triangle" style="font-size:24px;color:var(--color-text-danger);"></i>
+        Excluded Products (${excluded.length})
+      </div>
+      <p style="font-size: 14px; color: var(--color-text-secondary); margin-bottom: 1rem;">
+        These products were not containerized due to missing grouping data in the product master.
+      </p>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Product Name</th>
+              <th class="text-center">Cases</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${excluded.map(ex => `
+              <tr>
+                <td class="font-mono font-semibold">${ex.code}</td>
+                <td>${ex.name}</td>
+                <td class="text-center">${ex.cases}</td>
+                <td style="color: var(--color-text-danger); font-size: 13px;">${ex.reason}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
         }
 
         out.innerHTML = html;
