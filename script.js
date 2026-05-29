@@ -346,127 +346,293 @@ function packOrder(order, container) {
         };
     }
 
-    const sorted = [...order].sort((a, b) => b.case_count - a.case_count);
-
-    const stackList = [];
-    for (const item of sorted) {
-        const maxByHeight = Math.floor(cH / item.case_height);
-        const effectiveMax = (item.max_stack_height !== undefined) ?
-            Math.min(item.max_stack_height, maxByHeight) :
-            maxByHeight;
-
-        let remaining = item.case_count;
-        while (remaining > 0) {
-            const inThisStack = Math.min(remaining, effectiveMax);
-            stackList.push({
-                code: item.code,
-                name: item.name,
-                case_length: item.case_length,
-                case_width: item.case_width,
-                case_height: item.case_height,
-                gross_weight_kg: item.gross_weight_kg,
-                cases_in_stack: inThisStack,
-                physical_height: inThisStack * item.case_height
-            });
-            remaining -= inThisStack;
-        }
-    }
+    // Sort by footprint descending — larger cases claim floor space first
+    const sorted = [...order].sort((a, b) =>
+        (b.case_length * b.case_width) - (a.case_length * a.case_width));
 
     const floorPlan = [];
-    let freeRects = [{
-        x: 0,
-        y: 0,
-        length: cL,
-        width: cW
-    }];
+    let yOffset = 0;
+    const unplaced = sorted.map(item => ({ ...item }));
 
-    for (const stack of stackList) {
-        let bestRect = null,
-            bestX = Infinity,
-            bestY = Infinity,
-            bestShortSideFit = Infinity,
-            bestLongSideFit = Infinity,
-            bestSL, bestSW;
-        for (const rect of freeRects) {
-            for (const [sl, sw] of [
-                [stack.case_length, stack.case_width],
-                [stack.case_width, stack.case_length]
-            ]) {
-                if (sl <= rect.length + .001 && sw <= rect.width + .001) {
-                    const leftoverL = Math.max(0, rect.length - sl);
-                    const leftoverW = Math.max(0, rect.width - sw);
-                    const shortSideFit = Math.min(leftoverL, leftoverW);
-                    const longSideFit = Math.max(leftoverL, leftoverW);
+    while (unplaced.length > 0 && yOffset < cW - 0.001) {
+        const availWidth = cW - yOffset;
 
-                    const isBetter = bestRect === null ||
-                        shortSideFit < bestShortSideFit - 0.001 ||
-                        (Math.abs(shortSideFit - bestShortSideFit) <= 0.001 && longSideFit < bestLongSideFit - 0.001) ||
-                        (Math.abs(shortSideFit - bestShortSideFit) <= 0.001 && Math.abs(longSideFit - bestLongSideFit) <= 0.001 && (
-                            rect.x < bestX - 0.001 ||
-                            (Math.abs(rect.x - bestX) <= 0.001 && rect.y < bestY - 0.001)
-                        ));
-                    if (isBetter) {
-                        bestX = rect.x;
-                        bestY = rect.y;
-                        bestShortSideFit = shortSideFit;
-                        bestLongSideFit = longSideFit;
-                        bestRect = rect;
-                        bestSL = sl;
-                        bestSW = sw;
+        // Find first product whose smallest dimension fits remaining width
+        let chosenIdx = -1;
+        for (let i = 0; i < unplaced.length; i++) {
+            const minDim = Math.min(unplaced[i].case_length, unplaced[i].case_width);
+            if (minDim <= availWidth + 0.001) {
+                chosenIdx = i;
+                break;
+            }
+        }
+        if (chosenIdx === -1) break;
+
+        const item = unplaced.splice(chosenIdx, 1)[0];
+
+        // Build stacks
+        const maxByHeight = Math.floor(cH / item.case_height);
+        const effectiveMax = (item.max_stack_height !== undefined) ?
+            Math.min(item.max_stack_height, maxByHeight) : maxByHeight;
+        let remaining = item.case_count;
+        const stacks = [];
+        while (remaining > 0) {
+            const n = Math.min(remaining, effectiveMax);
+            stacks.push({
+                code: item.code,
+                name: item.name,
+                gross_weight_kg: item.gross_weight_kg,
+                cases_in_stack: n,
+                physical_height: n * item.case_height
+            });
+            remaining -= n;
+        }
+        if (stacks.length === 0) continue;
+
+        // Find optimal orientation mix: a stacks of ori-A + b stacks of ori-B
+        // to minimize unused width (availWidth - a*wA - b*wB).
+        // Ori-A: width = case_length (along y), depth = case_width (along x)
+        // Ori-B: width = case_width  (along y), depth = case_length (along x)
+        const wA = item.case_length, dA = item.case_width;
+        const wB = item.case_width, dB = item.case_length;
+        const isSquare = Math.abs(wA - wB) < 0.001;
+
+        let bestA = 0, bestB = 0, bestWaste = Infinity, bestTotal = 0;
+        const maxA = Math.floor((availWidth + 0.001) / wA);
+        for (let a = 0; a <= maxA; a++) {
+            const remW = availWidth - a * wA;
+            const b = isSquare ? 0 : Math.floor((remW + 0.001) / wB);
+            const total = a + b;
+            if (total === 0) continue;
+            const waste = remW - b * wB;
+            if (waste < bestWaste - 0.001 ||
+                (Math.abs(waste - bestWaste) <= 0.001 && total > bestTotal)) {
+                bestWaste = waste;
+                bestA = a;
+                bestB = b;
+                bestTotal = total;
+            }
+        }
+
+        if (bestTotal === 0) {
+            return {
+                success: false,
+                reason: `Cannot fit "${item.code}" (${item.name}) in remaining container width.`
+            };
+        }
+
+        // Create lanes — each orientation group tiles independently
+        const lanes = [];
+        if (bestA > 0) {
+            lanes.push({
+                stacksPerRow: bestA, width: wA, depth: dA,
+                yStart: yOffset, x: 0
+            });
+        }
+        if (bestB > 0) {
+            lanes.push({
+                stacksPerRow: bestB, width: wB, depth: dB,
+                yStart: yOffset + bestA * wA, x: 0
+            });
+        }
+
+        // Tile lanes from back wall toward door, drawing from shared stack pool.
+        // Always advance the lane furthest from the door (lowest x) first.
+        const placedStart = floorPlan.length;
+        let stackIdx = 0;
+        while (stackIdx < stacks.length) {
+            let bestLane = null;
+            for (const lane of lanes) {
+                if (lane.x + lane.depth <= cL + 0.001) {
+                    if (bestLane === null || lane.x < bestLane.x - 0.001) {
+                        bestLane = lane;
                     }
                 }
             }
+            if (bestLane === null) {
+                return {
+                    success: false,
+                    reason: `Insufficient floor space for all stacks of "${item.code}" (${item.name}). The order exceeds this container's floor area.`
+                };
+            }
+
+            const rowCount = Math.min(bestLane.stacksPerRow, stacks.length - stackIdx);
+            for (let j = 0; j < rowCount; j++) {
+                const stack = stacks[stackIdx];
+                floorPlan.push({
+                    code: stack.code,
+                    name: stack.name,
+                    x: bestLane.x,
+                    y: bestLane.yStart + j * bestLane.width,
+                    footprint_l: bestLane.depth,
+                    footprint_w: bestLane.width,
+                    cases_in_stack: stack.cases_in_stack,
+                    physical_height: stack.physical_height,
+                    gross_weight_kg: stack.gross_weight_kg
+                });
+                stackIdx++;
+            }
+            bestLane.x += bestLane.depth;
         }
-        if (!bestRect) return {
+
+        // Advance yOffset to the actual width used (not the theoretical lane width)
+        let maxY = yOffset;
+        for (let i = placedStart; i < floorPlan.length; i++) {
+            maxY = Math.max(maxY, floorPlan[i].y + floorPlan[i].footprint_w);
+        }
+        yOffset = maxY;
+    }
+
+    // Phase 2: Fill remaining container LENGTH with unplaced products.
+    // Products that couldn't share a width strip now tile after earlier products.
+    while (unplaced.length > 0) {
+        // Find the furthest x extent of all placed stacks
+        let xCursor = 0;
+        for (const p of floorPlan) {
+            xCursor = Math.max(xCursor, p.x + p.footprint_l);
+        }
+        if (xCursor >= cL - 0.001) break;
+
+        const remainLength = cL - xCursor;
+
+        // Find next product whose smallest depth fits remaining length
+        let chosenIdx = -1;
+        for (let i = 0; i < unplaced.length; i++) {
+            const minDepth = Math.min(unplaced[i].case_length, unplaced[i].case_width);
+            if (minDepth <= remainLength + 0.001) {
+                chosenIdx = i;
+                break;
+            }
+        }
+        if (chosenIdx === -1) break;
+
+        const item = unplaced.splice(chosenIdx, 1)[0];
+
+        // Build stacks
+        const maxByHeight2 = Math.floor(cH / item.case_height);
+        const effectiveMax2 = (item.max_stack_height !== undefined) ?
+            Math.min(item.max_stack_height, maxByHeight2) : maxByHeight2;
+        let remaining2 = item.case_count;
+        const stacks2 = [];
+        while (remaining2 > 0) {
+            const n = Math.min(remaining2, effectiveMax2);
+            stacks2.push({
+                code: item.code,
+                name: item.name,
+                gross_weight_kg: item.gross_weight_kg,
+                cases_in_stack: n,
+                physical_height: n * item.case_height
+            });
+            remaining2 -= n;
+        }
+        if (stacks2.length === 0) continue;
+
+        // Find optimal orientation mix across full container width
+        const wA2 = item.case_length, dA2 = item.case_width;
+        const wB2 = item.case_width, dB2 = item.case_length;
+        const isSquare2 = Math.abs(wA2 - wB2) < 0.001;
+
+        let bestA2 = 0, bestB2 = 0, bestWaste2 = Infinity, bestTotal2 = 0;
+        const maxA2 = Math.floor((cW + 0.001) / wA2);
+        for (let a = 0; a <= maxA2; a++) {
+            if (a > 0 && dA2 > remainLength + 0.001) continue;
+            const remW = cW - a * wA2;
+            let b = isSquare2 ? 0 : Math.floor((remW + 0.001) / wB2);
+            if (b > 0 && dB2 > remainLength + 0.001) b = 0;
+            const total = a + b;
+            if (total === 0) continue;
+            const waste = remW - b * wB2;
+            if (waste < bestWaste2 - 0.001 ||
+                (Math.abs(waste - bestWaste2) <= 0.001 && total > bestTotal2)) {
+                bestWaste2 = waste;
+                bestA2 = a;
+                bestB2 = b;
+                bestTotal2 = total;
+            }
+        }
+
+        if (bestTotal2 === 0) break;
+
+        // Create lanes at y=0, using per-lane x-cursors to fill notches
+        // left by Phase 1's uneven lane depths.
+        const lanes2 = [];
+        if (bestA2 > 0) {
+            const laneYStart = 0, laneYEnd = bestA2 * wA2;
+            let laneX = 0;
+            for (const p of floorPlan) {
+                const pYEnd = p.y + p.footprint_w;
+                if (p.y < laneYEnd - 0.001 && pYEnd > laneYStart + 0.001) {
+                    laneX = Math.max(laneX, p.x + p.footprint_l);
+                }
+            }
+            lanes2.push({
+                stacksPerRow: bestA2, width: wA2, depth: dA2,
+                yStart: laneYStart, x: laneX
+            });
+        }
+        if (bestB2 > 0) {
+            const laneYStart = bestA2 * wA2, laneYEnd = bestA2 * wA2 + bestB2 * wB2;
+            let laneX = 0;
+            for (const p of floorPlan) {
+                const pYEnd = p.y + p.footprint_w;
+                if (p.y < laneYEnd - 0.001 && pYEnd > laneYStart + 0.001) {
+                    laneX = Math.max(laneX, p.x + p.footprint_l);
+                }
+            }
+            lanes2.push({
+                stacksPerRow: bestB2, width: wB2, depth: dB2,
+                yStart: laneYStart, x: laneX
+            });
+        }
+
+        // Tile lanes from xCursor toward door
+        let stackIdx2 = 0;
+        while (stackIdx2 < stacks2.length) {
+            let bestLane2 = null;
+            for (const lane of lanes2) {
+                if (lane.x + lane.depth <= cL + 0.001) {
+                    if (bestLane2 === null || lane.x < bestLane2.x - 0.001) {
+                        bestLane2 = lane;
+                    }
+                }
+            }
+            if (bestLane2 === null) {
+                return {
+                    success: false,
+                    reason: `Insufficient floor space for all stacks of "${item.code}" (${item.name}). The order exceeds this container's floor area.`
+                };
+            }
+
+            const rowCount = Math.min(bestLane2.stacksPerRow, stacks2.length - stackIdx2);
+            for (let j = 0; j < rowCount; j++) {
+                const stack = stacks2[stackIdx2];
+                floorPlan.push({
+                    code: stack.code,
+                    name: stack.name,
+                    x: bestLane2.x,
+                    y: bestLane2.yStart + j * bestLane2.width,
+                    footprint_l: bestLane2.depth,
+                    footprint_w: bestLane2.width,
+                    cases_in_stack: stack.cases_in_stack,
+                    physical_height: stack.physical_height,
+                    gross_weight_kg: stack.gross_weight_kg
+                });
+                stackIdx2++;
+            }
+            bestLane2.x += bestLane2.depth;
+        }
+    }
+
+    // Any remaining products didn't fit
+    if (unplaced.length > 0) {
+        return {
             success: false,
-            reason: `Insufficient floor space for all stacks of "${stack.code}" (${stack.name}). The order exceeds this container's floor area.`
+            reason: `Insufficient space for "${unplaced[0].code}" (${unplaced[0].name}). The order exceeds this container's capacity.`
         };
-        floorPlan.push({
-            code: stack.code,
-            name: stack.name,
-            x: bestRect.x,
-            y: bestRect.y,
-            footprint_l: bestSL,
-            footprint_w: bestSW,
-            cases_in_stack: stack.cases_in_stack,
-            physical_height: stack.physical_height,
-            gross_weight_kg: stack.gross_weight_kg
-        });
-        // Maximal rectangles: split all overlapping free rects
-        const px = bestRect.x, py = bestRect.y;
-        const px2 = px + bestSL, py2 = py + bestSW;
-        const newFree = [];
-        for (const r of freeRects) {
-            const rx2 = r.x + r.length, ry2 = r.y + r.width;
-            if (px2 <= r.x + .001 || px >= rx2 - .001 ||
-                py2 <= r.y + .001 || py >= ry2 - .001) {
-                newFree.push(r);
-                continue;
-            }
-            if (px > r.x + .001)
-                newFree.push({ x: r.x, y: r.y, length: px - r.x, width: r.width });
-            if (px2 < rx2 - .001)
-                newFree.push({ x: px2, y: r.y, length: rx2 - px2, width: r.width });
-            if (py > r.y + .001)
-                newFree.push({ x: r.x, y: r.y, length: r.length, width: py - r.y });
-            if (py2 < ry2 - .001)
-                newFree.push({ x: r.x, y: py2, length: r.length, width: ry2 - py2 });
-        }
-        freeRects = newFree.filter((a, i) => {
-            for (let j = 0; j < newFree.length; j++) {
-                if (i === j) continue;
-                const b = newFree[j];
-                if (a.x >= b.x - .001 && a.y >= b.y - .001 &&
-                    a.x + a.length <= b.x + b.length + .001 &&
-                    a.y + a.width <= b.y + b.width + .001) return false;
-            }
-            return true;
-        });
     }
 
     const byCode = {};
     floorPlan.forEach(p => (byCode[p.code] = byCode[p.code] || []).push(p));
-    const usedArea = floorPlan.reduce((s, p) => s + p.footprint_l * p.footprint_w, 0);
     const totalWeight = floorPlan.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0);
     const totalVolumeCm3 = floorPlan.reduce((s, p) => s + p.footprint_l * p.footprint_w * p.physical_height, 0);
     const maxCBM = container.type ? CBM_LIMITS[container.type] : (cL * cW * cH) / 1000000;
@@ -676,9 +842,9 @@ function splitOrderByContainerRules(order) {
 
     for (const item of order) {
         const d = catalogue[item.code];
-        const cg = d.container_group;
-        const rtm = d.rtm;
-        const vendor = d.vendor;
+        const cg = d.container_group ? d.container_group.trim() : '';
+        const rtm = d.rtm ? d.rtm.trim() : '';
+        const vendor = d.vendor ? d.vendor.trim() : '';
 
         // Check exclusion conditions
         if (!cg) {
@@ -694,13 +860,17 @@ function splitOrderByContainerRules(order) {
             continue;
         }
 
-        // Build grouping key
-        const vendorPart = rtm.toUpperCase() === 'WU02' ? vendor : '*';
-        const key = `${cg}||${rtm}||${vendorPart}`;
+        // Build case-insensitive grouping key and labels
+        const cgUpper = cg.toUpperCase();
+        const rtmUpper = rtm.toUpperCase();
+        const vendorUpper = vendor.toUpperCase();
+
+        const vendorPart = rtmUpper === 'WU02' ? vendorUpper : '*';
+        const key = `${cgUpper}||${rtmUpper}||${vendorPart}`;
 
         if (!groups[key]) {
-            const labelParts = [`Group: ${cg}`, `RTM: ${rtm}`];
-            if (rtm.toUpperCase() === 'WU02') labelParts.push(`Vendor: ${vendor}`);
+            const labelParts = [`Group: ${cgUpper}`, `RTM: ${rtmUpper}`];
+            if (rtmUpper === 'WU02') labelParts.push(`Vendor: ${vendorUpper}`);
             groups[key] = { key, label: labelParts.join(' · '), items: [] };
         }
         groups[key].items.push(item);
@@ -993,7 +1163,7 @@ function selectPalletContainers(orderItems) {
     remainingPallets.sort((a, b) => a.code.localeCompare(b.code));
 
     const containers = [];
-    const typeOrder = ['20ft', '40ft', '40hc'];
+    const typeOrder = ['20ft', '40ft'];
 
     while (remainingPallets.length > 0) {
         let bestType = null;
@@ -1015,9 +1185,9 @@ function selectPalletContainers(orderItems) {
         if (bestType) {
             remainingPallets = remainingPallets.slice(packedPallets.length);
         } else {
-            bestType = '40hc';
-            const cap = PALLET_CAPACITY['40hc'];
-            const wl = WEIGHT_LIMITS['40hc'];
+            bestType = '40ft';
+            const cap = PALLET_CAPACITY['40ft'];
+            const wl = WEIGHT_LIMITS['40ft'];
 
             packedPallets = [];
             let totalW = 0;
