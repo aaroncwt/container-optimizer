@@ -1344,6 +1344,12 @@ function runPacking() {
         const totalWeight = allContainers.reduce((s, c) => s + c.result.metrics.total_weight, 0);
         const containerCount = allContainers.length;
         const totalPallets = loadMethod === 'palletized' ? allContainers.reduce((s, c) => s + c.result.metrics.pallets, 0) : 0;
+        const hasPartialPallets = loadMethod === 'palletized' && allContainers.some(c => 
+            c.result.packed_pallets && c.result.packed_pallets.some(p => {
+                const prod = catalogue[p.code];
+                return prod && p.cases < prod.cases_per_pallet;
+            })
+        );
 
         // Build summary table across all groups
         let containerTableHtml = '';
@@ -1356,17 +1362,19 @@ function runPacking() {
                     globalContainerIdx++;
                     const m = c.result.metrics;
                     const wl = WEIGHT_LIMITS[c.type];
+                    const weightPct = Math.round((m.total_weight / wl) * 100);
+                    const weightColor = weightPct >= 90 ? 'var(--color-brand)' : 'var(--color-text-tertiary)';
 
                     let innerTable = `
                     <div class="stack-details-container">
                       <table class="stack-table">
                         <thead>
                           <tr>
-                            <th>SKU</th>
+                            <th>Product</th>
                             <th>Product Name</th>
-                            <th style="text-align: center;">Cases</th>
+                            <th style="text-align: center;">Total Cases</th>
                             <th style="text-align: center;">Pallets</th>
-                            <th style="text-align: center;">Weight (kg)</th>
+                            <th style="text-align: center;">Total Weight</th>
                           </tr>
                         </thead>
                         <tbody>`;
@@ -1381,7 +1389,7 @@ function runPacking() {
                             <td>${positions[0].name}</td>
                             <td style="text-align: center;">${totCases}</td>
                             <td style="text-align: center;">${totPallets}</td>
-                            <td style="text-align: center;">${totWeight.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
+                            <td style="text-align: center;">${totWeight.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg</td>
                           </tr>`;
                     }
 
@@ -1395,7 +1403,7 @@ function runPacking() {
                         <td style="font-size: 12px; color: var(--color-text-secondary);">${group.label}</td>
                         <td style="text-align: center;">${m.total_cases}</td>
                         <td style="text-align: center;">${m.pallets} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${PALLET_CAPACITY[c.type]}</span></td>
-                        <td style="text-align: center;">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${wl.toLocaleString()}</span></td>
+                        <td style="text-align: center;">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${wl.toLocaleString()}</span> <span style="font-size:12px;font-weight:600;color:${weightColor};">(${weightPct}%)</span></td>
                       </tr>
                       <tr class="stack-details-row">
                         <td colspan="7">
@@ -1432,33 +1440,70 @@ function runPacking() {
                     const m = c.result.metrics;
                     const wl = WEIGHT_LIMITS[c.type];
                     const utilColor = m.volume_utilisation < 80 ? 'var(--color-text-danger)' : 'var(--color-brand)';
+                    const weightPct = Math.round((m.total_weight / wl) * 100);
+                    const weightColor = weightPct >= 90 ? 'var(--color-brand)' : 'var(--color-text-tertiary)';
+
+                    let innerTable = `
+                    <div class="stack-details-container">
+                      <table class="stack-table">
+                        <thead>
+                          <tr>
+                            <th>Product</th>
+                            <th>Product Name</th>
+                            <th style="text-align: center;">Total Cases</th>
+                            <th style="text-align: center;">Total Weight</th>
+                          </tr>
+                        </thead>
+                        <tbody>`;
+
+                    for (const [code, positions] of Object.entries(c.result.placement_plan)) {
+                        const totCases = positions.reduce((s, p) => s + p.cases_in_stack, 0);
+                        const totWeight = positions.reduce((s, p) => s + p.gross_weight_kg * p.cases_in_stack, 0);
+                        innerTable += `
+                          <tr>
+                            <td style="font-weight: 600; color: var(--color-text-primary);">${code}</td>
+                            <td>${positions[0].name}</td>
+                            <td style="text-align: center;">${totCases}</td>
+                            <td style="text-align: center;">${totWeight.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg</td>
+                          </tr>`;
+                    }
+
+                    innerTable += `</tbody></table></div>`;
+
                     tableRows += `
-                      <tr>
-                        <td class="font-mono font-bold text-muted">${globalContainerIdx}</td>
-                        <td class="font-semibold">${CONTAINER_LABELS[c.type]}</td>
+                      <tr class="product-row" onclick="toggleProductStacks(this)" style="background-color: var(--color-background-secondary);">
+                        <td style="text-align: center;"><i class="ti ti-chevron-right" style="transition: transform 0.2s;"></i></td>
+                        <td style="font-family: var(--font-mono); font-weight: 700; color: var(--color-text-primary);">#${globalContainerIdx}</td>
+                        <td style="font-weight: 600;">${CONTAINER_LABELS[c.type]}</td>
                         <td style="font-size: 12px; color: var(--color-text-secondary);">${group.label}</td>
-                        <td class="text-center">${m.total_cases}</td>
-                        <td class="text-center">${m.stacks}</td>
-                        <td class="text-center font-semibold" style="color:${utilColor}">${m.volume_utilisation}%</td>
-                        <td class="text-center">${m.total_cbm.toFixed(1)} <span class="text-muted" style="font-size:12px;">/ ${m.container_cbm.toFixed(1)}</span></td>
-                        <td class="text-center">${Math.round(m.total_weight).toLocaleString()} <span class="text-muted" style="font-size:12px;">/ ${wl.toLocaleString()}</span></td>
+                        <td style="text-align: center;">${m.total_cases}</td>
+                        <td style="text-align: center;">${m.stacks}</td>
+                        <td style="text-align: center; font-weight: 600; color: ${utilColor}">${m.volume_utilisation}%</td>
+                        <td style="text-align: center;">${m.total_cbm.toFixed(1)} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${m.container_cbm.toFixed(1)}</span></td>
+                        <td style="text-align: center;">${Math.round(m.total_weight).toLocaleString()} <span style="font-size:12px;color:var(--color-text-tertiary);">/ ${wl.toLocaleString()}</span> <span style="font-size:12px;font-weight:600;color:${weightColor};">(${weightPct}%)</span></td>
+                      </tr>
+                      <tr class="stack-details-row">
+                        <td colspan="9">
+                          ${innerTable}
+                        </td>
                       </tr>`;
                 }
             }
 
             containerTableHtml = `
-          <div class="data-table-wrapper" style="margin-top: 1rem;">
-            <table class="data-table">
+          <div style="margin-top: 1rem;">
+            <table class="expandable-table">
               <thead>
                 <tr>
-                  <th style="width: 40px;">#</th>
+                  <th style="width: 40px;"></th>
+                  <th>Container</th>
                   <th>Type</th>
                   <th>Group</th>
-                  <th class="text-center">Cases</th>
-                  <th class="text-center">Stacks</th>
-                  <th class="text-center">CBM Util.</th>
-                  <th class="text-center">Volume (m³)</th>
-                  <th class="text-center">Weight (kg)</th>
+                  <th style="text-align: center;">Cases</th>
+                  <th style="text-align: center;">Stacks</th>
+                  <th style="text-align: center;">CBM Util.</th>
+                  <th style="text-align: center;">Volume (m³)</th>
+                  <th style="text-align: center;">Weight (kg)</th>
                 </tr>
               </thead>
               <tbody>
@@ -1475,6 +1520,13 @@ function runPacking() {
         Summary: ${loadMethod === 'palletized' ? 'Palletized Load' : 'Loose Load'} — ${groups.length} group${groups.length !== 1 ? 's' : ''}
       </div>
       
+      ${hasPartialPallets ? `
+      <div class="msg-warn" style="margin-bottom: 1.5rem; margin-top: 0;">
+        <i class="ti ti-alert-triangle" style="font-size: 20px;"></i>
+        <span><strong>Order contains partial pallets.</strong> Partial pallets occupy a full pallet slot in the container.</span>
+      </div>
+      ` : ''}
+
       <div class="metric-flat-grid">
         <div class="metric-flat"><div class="val">${containerCount}</div><div class="lbl">container${containerCount !== 1 ? 's' : ''}</div></div>
         <div class="metric-flat"><div class="val">${totalCases}</div><div class="lbl">cases packed</div></div>
@@ -1658,3 +1710,27 @@ function toggleProductStacks(el) {
 }
 
 renderOrderList();
+
+function autoLoadProductMaster() {
+    fetch('Products.xlsx')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.arrayBuffer();
+        })
+        .then(buffer => {
+            const wb = XLSX.read(buffer, {
+                type: 'array'
+            });
+            const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {
+                defval: ''
+            });
+            if (!rows.length) throw new Error('Sheet appears empty.');
+            parseCatalogue(rows, 'Products.xlsx');
+        })
+        .catch(err => {
+            console.warn('Products.xlsx auto-load skipped or failed (this is normal if running via file:// protocol):', err);
+        });
+}
+autoLoadProductMaster();
